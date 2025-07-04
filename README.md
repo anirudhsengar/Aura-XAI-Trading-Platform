@@ -97,14 +97,14 @@ Aura addresses these problems by providing a unified, user-friendly platform wit
         *   *Financial Libraries:* yfinance (for MVP data), ta (for technical analysis).
     *   *Frontend:* *React.js* or *Vue.js*.
         *   *Charting:* lightweight-charts by TradingView or Chart.js.
-    *   *Database:* *PostgreSQL* (to store user data, strategy configurations, and backtest results) and/or a simple file-based storage (e.g., Parquet files) for market data.
+    *   *Data Storage:* *File-based storage* using JSON files for configurations and results, Parquet/CSV files for market data.
     *   *Deployment:* *Docker* for containerization, hosted on a cloud provider like *AWS, Google Cloud, or Heroku*.
 
 *   *Data Flow Diagram:*
-    1.  *Data Ingestion:* A scheduled worker script fetches data from APIs (Market Data, News) -> Stores in Database/Parquet files.
+    1.  *Data Ingestion:* A scheduled worker script fetches data from APIs (Market Data, News) -> Stores in local Parquet/CSV files.
     2.  *User Request:* User selects Asset & Strategy on Frontend -> Sends API request to Python Backend.
     3.  *Backend Processing:*
-        *   Backend loads relevant historical data.
+        *   Backend loads relevant historical data from local files.
         *   Applies feature engineering (indicators, sentiment scores).
         *   Runs the backtesting simulation.
         *   For each AI decision, it runs the trained model and then passes the model and data instance to the SHAP explainer.
@@ -113,44 +113,8 @@ Aura addresses these problems by providing a unified, user-friendly platform wit
 
 ---
 
-### *6. Implementation Plan & Roadmap*
 
-#### *Phase 1: The Core Backtester (MVP) - (Target: 1-2 Months)*
-*   *Goal:* Build the foundational engine.
-*   *Tasks:*
-    *   Set up backend server with Flask/FastAPI.
-    *   Implement data ingestion for daily stock data from yfinance.
-    *   Build the core event-driven backtesting engine.
-    *   Implement 2-3 simple, non-AI strategies (e.g., Moving Average Crossover).
-    *   Develop a basic frontend to select a stock, run a backtest, and display the equity curve and key metrics.
-
-#### *Phase 2: AI Integration - (Target: Month 3)*
-*   *Goal:* Integrate predictive intelligence.
-*   *Tasks:*
-    *   Integrate news data ingestion and the Hugging Face sentiment analysis pipeline.
-    *   Create a new "Sentiment" strategy that uses the daily sentiment score as a factor.
-    *   Backtest and compare the performance of the AI-enhanced strategy against the simple ones.
-
-#### *Phase 3: The XAI "Aura" - (Target: Month 4)*
-*   *Goal:* Deliver the core value proposition of explainability.
-*   *Tasks:*
-    *   Train a simple machine learning model (e.g., XGBoost or a simple neural net) that uses technical indicators and sentiment scores to generate buy/sell signals.
-    *   Integrate the *SHAP* library.
-    *   For each trade, calculate and store the SHAP values.
-    *   Design and build the frontend components to visualize the SHAP force plots in an intuitive way. This is the "Aura" reveal.
-
-#### *Phase 4: Polish & Advanced Features - (Target: Month 5-6)*
-*   *Goal:* Make the platform robust and feature-rich.
-*   *Tasks:*
-    *   User authentication and accounts.
-    *   Saving backtest results and strategy configurations.
-    *   Adding more data sources, more pre-built strategies, and more technical indicators.
-    *   Improving UI/UX based on initial feedback.
-    *   Writing comprehensive documentation.
-
----
-
-### *7. Risks and Mitigations*
+### *6. Risks and Mitigations*
 
 *   *Risk:* Data Quality & Cost. Free data sources can be unreliable.
     *   *Mitigation:* Start with free sources (yfinance) for the MVP. For a production system, budget for a premium data provider (e.g., Alpaca, Polygon).
