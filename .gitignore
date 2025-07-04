@@ -1,2 +1,283 @@
+# Aura Platform .gitignore
+
+# =============================================================================
+# Environment and Configuration Files
+# =============================================================================
+.env
+.env.local
+.env.production
+.env.staging
+config.local.py
+secrets.py
+
+# =============================================================================
+# Data Files
+# =============================================================================
+data/
+*.csv
+*.parquet
+*.json
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# Exclude data directories but keep structure
+data/market_data/*
+data/news_data/*
+data/features/*
+data/cache/*
+data/results/*
+!data/market_data/.gitkeep
+!data/news_data/.gitkeep
+!data/features/.gitkeep
+!data/cache/.gitkeep
+!data/results/.gitkeep
+
+# =============================================================================
+# Logs and Temporary Files
+# =============================================================================
+logs/
+*.log
+*.log.*
+tmp/
+temp/
+.tmp/
+
+# =============================================================================
+# Machine Learning Models
+# =============================================================================
+models/
+*.model
+*.joblib
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.pb
+
+# Exclude models directory but keep structure
+models/*
+!models/.gitkeep
+
+# =============================================================================
+# Python
+# =============================================================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+.env
 .venv
-__pycache__
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# =============================================================================
+# Jupyter Notebook
+# =============================================================================
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# =============================================================================
+# IDEs and Editors
+# =============================================================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# =============================================================================
+# Operating System Files
+# =============================================================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# =============================================================================
+# Streamlit
+# =============================================================================
+.streamlit/
+*.streamlit
+
+# =============================================================================
+# API Keys and Secrets
+# =============================================================================
+api_keys.txt
+secrets.json
+credentials.json
+token.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# =============================================================================
+# Database Files
+# =============================================================================
+*.db
+*.sqlite
+*.sqlite3
+
+# =============================================================================
+# Backup Files
+# =============================================================================
+*.bak
+*.backup
+*.old
+*.orig
+
+# =============================================================================
+# Compressed Files
+# =============================================================================
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# =============================================================================
+# Custom Aura Files
+# =============================================================================
+# Custom strategy files (if containing proprietary logic)
+strategies/custom/
+strategies/proprietary/
+
+# User-specific configurations
+user_config.py
+local_settings.py
+
+# Performance profiling
+*.prof
+*.profile
+
+# Documentation builds
+docs/_build/
+docs/build/
+
+# =============================================================================
+# Keep Important Empty Directories
+# =============================================================================
+!.gitkeep
