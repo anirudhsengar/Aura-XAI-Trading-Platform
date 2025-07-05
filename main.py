@@ -27,15 +27,6 @@ except ImportError as e:
     st.error(f"Error importing backend modules: {e}")
     st.stop()
 
-# Initialize session state
-if 'analysis_results' not in st.session_state:
-    st.session_state.analysis_results = None
-if 'current_data' not in st.session_state:
-    st.session_state.current_data = None
-if 'current_strategy' not in st.session_state:
-    st.session_state.current_strategy = None
-
-@st.cache_data
 def load_data(symbol, start_date, end_date):
     """Load and cache market data."""
     try:
@@ -46,7 +37,6 @@ def load_data(symbol, start_date, end_date):
     except Exception as e:
         return None, None, str(e)
 
-@st.cache_data
 def process_features(market_data, news_data, symbol):
     """Process features and cache results."""
     try:
@@ -103,8 +93,29 @@ def main():
     
     # Asset Selection
     st.sidebar.subheader("Asset Selection")
-    symbol = st.sidebar.text_input("Stock Symbol", value="AAPL", help="Enter stock ticker (e.g., AAPL, GOOGL)")
-    
+
+    stock_options = {
+        "Apple": "AAPL",
+        "Google": "GOOGL",
+        "Microsoft": "MSFT",
+        "Amazon": "AMZN",
+        "Tesla": "TSLA",
+        "NVIDIA": "NVDA",
+        "Other (Custom)": "CUSTOM"
+    }
+
+    selected_option = st.sidebar.selectbox(
+        "Select Stock",
+        options = list(stock_options.keys()),
+        index = 0,  # Default to Apple
+        help = "Select a stock or choose 'Other' to enter a custom ticker."
+    )
+
+    if stock_options[selected_option] == "CUSTOM":
+        symbol = st.sidebar.text_input("Enter Custom Symbol", value="SPY").upper()
+    else:
+        symbol = stock_options[selected_option]
+
     # Validate symbol
     if symbol and not DataValidator.validate_stock_symbol(symbol):
         st.sidebar.error("Invalid stock symbol format")
@@ -132,7 +143,10 @@ def main():
         "Momentum": "momentum", 
         "Multi-Factor": "multi_factor"
     }
-    selected_strategy_name = st.sidebar.selectbox("Choose Strategy", list(strategy_options.keys()))
+    selected_strategy_name = st.sidebar.selectbox("Choose Strategy", 
+                                                  index = 0,
+                                                  options = list(strategy_options.keys()),
+                                                  help = "Select one of the common algorithmic trading strategies")
     selected_strategy = strategy_options[selected_strategy_name]
     
     # Strategy Parameters
@@ -209,25 +223,10 @@ def main():
                 st.error(f"Error running backtest: {error}")
                 return
             
-            # Store results in session state
-            st.session_state.analysis_results = results
-            st.session_state.current_data = processed_data
-            st.session_state.current_strategy = strategy
-            
         st.success("Analysis completed!")
         
         # Display results
         display_results(results, processed_data, strategy, symbol)
-    
-    elif st.session_state.analysis_results is not None:
-        # Display cached results
-        display_results(
-            st.session_state.analysis_results,
-            st.session_state.current_data,
-            st.session_state.current_strategy,
-            symbol
-        )
-    
     else:
         display_welcome_screen()
 
@@ -253,22 +252,15 @@ def display_performance_tab(results, data):
     """Display performance metrics and charts."""
     st.subheader("Backtest Performance")
     
-    # Performance metrics - fix delta calculations
+    # Performance metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        # Delta should be 0 if no trades were executed
-        excess_delta = results['excess_return'] if results['total_trades'] > 0 else 0
         st.metric("Total Return", f"{results['total_return']:.2%}")
     with col2:
-        # Information ratio as delta only if meaningful
-        info_ratio_delta = results['information_ratio'] if results['total_trades'] > 0 else 0
         st.metric("Sharpe Ratio", f"{results['sharpe_ratio']:.2f}")
     with col3:
-        # Drawdown duration delta only if trades occurred
-        dd_duration_delta = results['avg_drawdown_duration'] if results['total_trades'] > 0 else 0
         st.metric("Max Drawdown", f"{results['max_drawdown']:.2%}")
     with col4:
-        # Trade count as delta
         st.metric("Win Rate", f"{results['win_rate']:.2%}")
     
     # Additional metrics
