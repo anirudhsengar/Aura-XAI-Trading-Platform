@@ -4,9 +4,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 import warnings
-import sys
-import os
-from pathlib import Path
 import numpy as np
 
 from backend.data_manager import DataManager
@@ -14,7 +11,7 @@ from backend.feature_engine import FeatureEngine
 from backend.strategies import StrategyFactory
 from backend.backtester import BacktestEngine
 from backend.explainer import Explainer
-from backend.utils import DataValidator, LoggingUtils
+from backend.utils import DataValidator
 
 warnings.filterwarnings('ignore')
 
