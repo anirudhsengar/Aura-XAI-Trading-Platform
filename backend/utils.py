@@ -3,9 +3,10 @@ import numpy as np
 import os
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import Union, List, Dict, Any, Optional
+from datetime import datetime
+from typing import List, Dict, Any
 import warnings
+
 warnings.filterwarnings('ignore')
 
 class DateUtils:
@@ -276,77 +277,6 @@ class FileUtils:
             path: Directory path
         """
         os.makedirs(path, exist_ok=True)
-    
-    @staticmethod
-    def save_json(data: Dict[str, Any], filepath: str) -> None:
-        """
-        Save dictionary to JSON file.
-        
-        Args:
-            data: Dictionary to save
-            filepath: Path to save file
-        """
-        FileUtils.ensure_directory_exists(os.path.dirname(filepath))
-        with open(filepath, 'w') as f:
-            json.dump(data, f, indent=2, default=str)
-    
-    @staticmethod
-    def load_json(filepath: str) -> Dict[str, Any]:
-        """
-        Load dictionary from JSON file.
-        
-        Args:
-            filepath: Path to JSON file
-            
-        Returns:
-            Dict: Loaded data
-        """
-        try:
-            with open(filepath, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            return {}
-    
-    @staticmethod
-    def save_dataframe(df: pd.DataFrame, filepath: str, format: str = 'parquet') -> None:
-        """
-        Save DataFrame to file.
-        
-        Args:
-            df: DataFrame to save
-            filepath: Path to save file
-            format: File format ('parquet', 'csv')
-        """
-        FileUtils.ensure_directory_exists(os.path.dirname(filepath))
-        
-        if format == 'parquet':
-            df.to_parquet(filepath)
-        elif format == 'csv':
-            df.to_csv(filepath, index=False)
-        else:
-            raise ValueError(f"Unsupported format: {format}")
-    
-    @staticmethod
-    def load_dataframe(filepath: str, format: str = 'parquet') -> pd.DataFrame:
-        """
-        Load DataFrame from file.
-        
-        Args:
-            filepath: Path to file
-            format: File format ('parquet', 'csv')
-            
-        Returns:
-            pd.DataFrame: Loaded data
-        """
-        try:
-            if format == 'parquet':
-                return pd.read_parquet(filepath)
-            elif format == 'csv':
-                return pd.read_csv(filepath, index_col=0, parse_dates=True)
-            else:
-                raise ValueError(f"Unsupported format: {format}")
-        except FileNotFoundError:
-            return pd.DataFrame()
 
 class LoggingUtils:
     """
@@ -411,28 +341,3 @@ class LoggingUtils:
             end_date: End date
         """
         logger.info(f"Fetching data for {symbol} from {start_date} to {end_date}")
-
-# Example usage and testing functions
-if __name__ == "__main__":
-    # Test date utilities
-    print("Testing DateUtils...")
-    today = datetime.now()
-    print(f"Is today a trading day? {DateUtils.is_trading_day(today)}")
-    
-    # Test data validation
-    print("\nTesting DataValidator...")
-    print(f"Is 'AAPL' a valid symbol? {DataValidator.validate_stock_symbol('AAPL')}")
-    print(f"Is 'apple' a valid symbol? {DataValidator.validate_stock_symbol('apple')}")
-    
-    # Test math utilities
-    print("\nTesting MathUtils...")
-    sample_prices = pd.Series([100, 101, 99, 102, 98])
-    returns = MathUtils.calculate_returns(sample_prices)
-    print(f"Sample returns: {returns.values}")
-    
-    # Test logging
-    print("\nTesting LoggingUtils...")
-    logger = LoggingUtils.setup_logger("test_logger")
-    logger.info("Test log message")
-    
-    print("All utility functions working correctly!")
