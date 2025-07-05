@@ -9,23 +9,14 @@ import os
 from pathlib import Path
 import numpy as np
 
+from backend.data_manager import DataManager
+from backend.feature_engine import FeatureEngine
+from backend.strategies import StrategyFactory
+from backend.backtester import BacktestEngine
+from backend.explainer import Explainer
+from backend.utils import DataValidator, LoggingUtils
+
 warnings.filterwarnings('ignore')
-
-# Add backend directory to path
-backend_path = Path(__file__).parent / "backend"
-sys.path.append(str(backend_path))
-
-# Import backend modules
-try:
-    from data_manager import DataManager
-    from feature_engine import FeatureEngine
-    from strategies import StrategyFactory
-    from backtester import BacktestEngine
-    from explainer import Explainer
-    from utils import DataValidator, LoggingUtils
-except ImportError as e:
-    st.error(f"Error importing backend modules: {e}")
-    st.stop()
 
 def load_data(symbol, start_date, end_date):
     """Load and cache market data."""
