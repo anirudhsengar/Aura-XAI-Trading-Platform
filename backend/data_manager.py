@@ -1,52 +1,36 @@
 import pandas as pd
-import numpy as np
 import yfinance as yf
 import requests
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 import time
 import os
-from pathlib import Path
 from dotenv import load_dotenv
-
-# Import utilities
-from utils import DateUtils, DataValidator, FileUtils, LoggingUtils
+from utils import DataValidator, LoggingUtils
 
 class DataManager:
     """
     Data Manager for fetching and managing financial and news data.
     """
     
-    def __init__(self, cache_dir: str = "../data", log_level: str = "INFO"):
+    def __init__(self, log_level: str = "INFO"):
         """
-        Initialize DataManager with caching and logging.
+        Initialize DataManager with logging.
         
         Args:
-            cache_dir: Directory for caching data
             log_level: Logging level
         """
         # Load environment variables from .env file
         load_dotenv()
         
-        self.cache_dir = Path(cache_dir)
-        self.market_data_dir = self.cache_dir / "market_data"
-        self.news_data_dir = self.cache_dir / "news_data"
-        self.cache_data_dir = self.cache_dir / "cache"
-        
-        # Ensure directories exist
-        FileUtils.ensure_directory_exists(str(self.market_data_dir))
-        FileUtils.ensure_directory_exists(str(self.news_data_dir))
-        FileUtils.ensure_directory_exists(str(self.cache_data_dir))
-        
         # Setup logging
         self.logger = LoggingUtils.setup_logger(
             "DataManager", 
-            log_file=str(self.cache_dir.parent / "logs" / "data_manager.log"),
+            log_file=str("./logs" / "data_manager.log"),
             level=log_level
         )
         
         # Configuration
-        self.cache_duration_hours = 24  # Cache data for 24 hours
         self.max_retries = 3
         self.retry_delay = 1  # seconds
         
@@ -54,14 +38,13 @@ class DataManager:
         self.news_api_key = os.getenv("NEWS_API_KEY", "")
         self.finnhub_api_key = os.getenv("FINNHUB_API_KEY", "")
         
-        # Log API key status (without revealing the keys)
+        # Log API key status
         self.logger.info(f"NewsAPI key loaded: {'Yes' if self.news_api_key else 'No'}")
         self.logger.info(f"Finnhub key loaded: {'Yes' if self.finnhub_api_key else 'No'}")
         
         self.logger.info("DataManager initialized successfully")
     
-    def fetch_market_data(self, symbol: str, start_date: datetime, end_date: datetime, 
-                         force_refresh: bool = False) -> pd.DataFrame:
+    def fetch_market_data(self, symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
         """
         Fetch OHLCV market data for a given symbol and date range.
         
@@ -69,7 +52,6 @@ class DataManager:
             symbol: Stock ticker symbol
             start_date: Start date for data
             end_date: End date for data
-            force_refresh: Force refresh data from API
             
         Returns:
             pd.DataFrame: OHLCV data with DatetimeIndex
@@ -82,17 +64,6 @@ class DataManager:
             raise ValueError(f"Invalid date range: {start_date} to {end_date}")
         
         LoggingUtils.log_data_fetch(self.logger, symbol, str(start_date), str(end_date))
-        
-        # Check cache first
-        cache_file = self.market_data_dir / f"{symbol}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.parquet"
-        
-        if not force_refresh and cache_file.exists():
-            file_age = datetime.now() - datetime.fromtimestamp(cache_file.stat().st_mtime)
-            if file_age.total_seconds() < self.cache_duration_hours * 3600:
-                self.logger.info(f"Loading cached data for {symbol}")
-                df = FileUtils.load_dataframe(str(cache_file), format='parquet')
-                if not df.empty and DataValidator.validate_ohlcv_data(df):
-                    return df
         
         # Fetch from API with retry logic
         for attempt in range(self.max_retries):
@@ -116,10 +87,6 @@ class DataManager:
                 if not DataValidator.validate_ohlcv_data(df):
                     raise ValueError(f"Invalid OHLCV data for {symbol}")
                 
-                # Cache the data
-                FileUtils.save_dataframe(df, str(cache_file), format='parquet')
-                self.logger.info(f"Successfully fetched and cached data for {symbol}")
-                
                 return df
                 
             except Exception as e:
@@ -131,8 +98,7 @@ class DataManager:
         
         return pd.DataFrame()
     
-    def fetch_news_data(self, symbol: str, start_date: datetime, end_date: datetime,
-                       force_refresh: bool = False) -> pd.DataFrame:
+    def fetch_news_data(self, symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
         """
         Fetch news data for a given symbol and date range.
         
@@ -140,7 +106,6 @@ class DataManager:
             symbol: Stock ticker symbol
             start_date: Start date for news
             end_date: End date for news
-            force_refresh: Force refresh data from API
             
         Returns:
             pd.DataFrame: News data with headlines and metadata
@@ -150,18 +115,7 @@ class DataManager:
             raise ValueError(f"Invalid stock symbol: {symbol}")
         
         self.logger.info(f"Fetching news data for {symbol} from {start_date} to {end_date}")
-        
-        # Check cache first
-        cache_file = self.news_data_dir / f"{symbol}_news_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.parquet"
-        
-        if not force_refresh and cache_file.exists():
-            file_age = datetime.now() - datetime.fromtimestamp(cache_file.stat().st_mtime)
-            if file_age.total_seconds() < self.cache_duration_hours * 3600:
-                self.logger.info(f"Loading cached news data for {symbol}")
-                df = FileUtils.load_dataframe(str(cache_file), format='parquet')
-                if not df.empty:
-                    return df
-        
+
         # Fetch news from multiple sources
         news_data = []
         
@@ -206,10 +160,6 @@ class DataManager:
             
             # Remove duplicates based on headline
             df = df.drop_duplicates(subset=['headline'], keep='first')
-            
-            # Cache the data
-            FileUtils.save_dataframe(df, str(cache_file), format='parquet')
-            self.logger.info(f"Successfully fetched and cached {len(df)} news articles for {symbol}")
             
             return df
         else:
@@ -376,83 +326,3 @@ class DataManager:
             self.logger.error(f"Error fetching NewsAPI data: {str(e)}")
             
         return news_data
-    
-    def get_available_symbols(self) -> List[str]:
-        """
-        Get list of available symbols from cached data.
-        
-        Logic: Scans cached market data to provide a list of available
-        symbols for user selection.
-        
-        Returns:
-            List[str]: Available stock symbols
-        """
-        symbols = []
-        
-        try:
-            for file in self.market_data_dir.glob("*.parquet"):
-                # Extract symbol from filename (format: SYMBOL_YYYYMMDD_YYYYMMDD.parquet)
-                symbol = file.stem.split('_')[0]
-                if symbol not in symbols:
-                    symbols.append(symbol)
-                    
-        except Exception as e:
-            self.logger.error(f"Error getting available symbols: {str(e)}")
-            
-        return sorted(symbols)
-    
-    def clear_cache(self, symbol: str = None, older_than_days: int = 30) -> None:
-        """
-        Clear cached data.
-        
-        Logic: Removes old cached data to free up space and ensure
-        fresh data retrieval.
-        
-        Args:
-            symbol: Specific symbol to clear (None for all)
-            older_than_days: Remove files older than this many days
-        """
-        cutoff_date = datetime.now() - timedelta(days=older_than_days)
-        
-        directories = [self.market_data_dir, self.news_data_dir, self.cache_data_dir]
-        
-        for directory in directories:
-            for file in directory.glob("*.parquet"):
-                if symbol and not file.name.startswith(symbol):
-                    continue
-                    
-                file_date = datetime.fromtimestamp(file.stat().st_mtime)
-                if file_date < cutoff_date:
-                    file.unlink()
-                    self.logger.info(f"Removed old cache file: {file.name}")
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Initialize DataManager
-    dm = DataManager()
-    
-    # Test market data fetching
-    try:
-        print("Testing market data fetching...")
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)
-        
-        market_data = dm.fetch_market_data("AAPL", start_date, end_date)
-        print(f"Fetched {len(market_data)} days of market data for AAPL")
-        print(market_data.head())
-        
-        # Test news data fetching
-        print("\nTesting news data fetching...")
-        news_data = dm.fetch_news_data("AAPL", start_date, end_date)
-        print(f"Fetched {len(news_data)} news articles for AAPL")
-        if not news_data.empty:
-            print(news_data.head())
-        
-        # Test company info
-        print("\nTesting company info...")
-        company_info = dm.get_company_info("AAPL")
-        print(f"Company name: {company_info.get('name', 'N/A')}")
-        print(f"Sector: {company_info.get('sector', 'N/A')}")
-        
-    except Exception as e:
-        print(f"Error during testing: {str(e)}")
