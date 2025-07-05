@@ -43,7 +43,7 @@ class Explainer:
         """
         self.logger = LoggingUtils.setup_logger(
             "Explainer",
-            log_level=log_level
+            level=log_level
         )
         
         # Initialize SHAP explainer (will be set based on strategy type)

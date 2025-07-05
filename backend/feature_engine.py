@@ -53,25 +53,18 @@ class FeatureEngine:
     def _initialize_sentiment_models(self):
         """
         Initialize sentiment analysis models.
+        
+        Logic: Uses TextBlob for basic sentiment analysis, removing
+        complex ML dependencies.
         """
         try:
-            # Initialize FinBERT for financial sentiment analysis
-            self.finbert_tokenizer = AutoTokenizer.from_pretrained("ProsusAI/finbert")
-            self.finbert_model = AutoModelForSequenceClassification.from_pretrained("ProsusAI/finbert")
-            
-            # Create sentiment pipeline
-            self.sentiment_pipeline = pipeline(
-                "sentiment-analysis",
-                model=self.finbert_model,
-                tokenizer=self.finbert_tokenizer,
-                device=0 if torch.cuda.is_available() else -1
-            )
-            
-            self.logger.info("FinBERT sentiment model loaded successfully")
+            # Use only TextBlob for sentiment analysis
+            from textblob import TextBlob
+            self.sentiment_pipeline = None  # No complex ML pipeline
+            self.logger.info("Using TextBlob for sentiment analysis")
             
         except Exception as e:
-            self.logger.warning(f"Failed to load FinBERT model: {str(e)}")
-            self.logger.info("Falling back to TextBlob for sentiment analysis")
+            self.logger.warning(f"Failed to load TextBlob: {str(e)}")
             self.sentiment_pipeline = None
     
     def calculate_technical_indicators(self, df: pd.DataFrame, symbol: str = None) -> pd.DataFrame:
@@ -376,13 +369,13 @@ class FeatureEngine:
     
     def _analyze_sentiment(self, text: str) -> float:
         """
-        Analyze sentiment of a text string.
+        Analyze sentiment of a text string using TextBlob only.
         
         Args:
             text: Text to analyze
             
         Returns:
-            float: Sentiment score
+            float: Sentiment score between -1 and 1
         """
         if not text or pd.isna(text):
             return 0.0
@@ -394,21 +387,10 @@ class FeatureEngine:
             return 0.0
         
         try:
-            if self.sentiment_pipeline:
-                # Use FinBERT
-                result = self.sentiment_pipeline(text[:512])  # Limit text length
-                
-                # Convert to numeric score
-                if result[0]['label'] == 'positive':
-                    return result[0]['score']
-                elif result[0]['label'] == 'negative':
-                    return -result[0]['score']
-                else:  # neutral
-                    return 0.0
-            else:
-                # Fall back to TextBlob
-                blob = TextBlob(text)
-                return blob.sentiment.polarity
+            # Use TextBlob only
+            from textblob import TextBlob
+            blob = TextBlob(text)
+            return blob.sentiment.polarity
                 
         except Exception as e:
             self.logger.warning(f"Error analyzing sentiment: {str(e)}")

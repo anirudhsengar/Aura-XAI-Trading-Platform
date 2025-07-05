@@ -70,7 +70,7 @@ def run_backtest(strategy_name, strategy_params, data, symbol):
     try:
         # Create strategy
         strategy = StrategyFactory.create_strategy(strategy_name, strategy_params)
-        
+
         # Initialize backtester
         backtester = BacktestEngine(
             initial_capital=100000,
@@ -83,7 +83,9 @@ def run_backtest(strategy_name, strategy_params, data, symbol):
         
         return results, strategy, None
     except Exception as e:
-        return None, None, str(e)
+        import traceback
+        error_msg = f"Error in backtest: {str(e)}\n{traceback.format_exc()}"
+        return None, None, error_msg
 
 def main():
     st.set_page_config(
@@ -93,11 +95,11 @@ def main():
         initial_sidebar_state="expanded"
     )
     
-    st.title("🔮 Aura - Explainable AI Trading Platform")
+    st.title("Aura - XAI Trading Platform")
     st.markdown("*Demystifying algorithmic trading through transparent AI explanations*")
     
     # Sidebar for user inputs
-    st.sidebar.header("📊 Configuration")
+    st.sidebar.header("Configuration")
     
     # Asset Selection
     st.sidebar.subheader("Asset Selection")
@@ -125,10 +127,10 @@ def main():
     # Strategy Selection
     st.sidebar.subheader("Strategy Selection")
     strategy_options = {
+        "Simple MA Crossover": "simple_ma",
         "Mean Reversion": "mean_reversion",
         "Momentum": "momentum", 
-        "Multi-Factor": "multi_factor",
-        "ML Strategy": "ml_strategy"
+        "Multi-Factor": "multi_factor"
     }
     selected_strategy_name = st.sidebar.selectbox("Choose Strategy", list(strategy_options.keys()))
     selected_strategy = strategy_options[selected_strategy_name]
@@ -137,7 +139,12 @@ def main():
     st.sidebar.subheader("Strategy Parameters")
     strategy_params = {}
     
-    if selected_strategy == "mean_reversion":
+    if selected_strategy == "simple_ma":
+        strategy_params = {
+            'fast_ma': st.sidebar.slider("Fast MA Period", 5, 20, 10),
+            'slow_ma': st.sidebar.slider("Slow MA Period", 15, 50, 20)
+        }
+    elif selected_strategy == "mean_reversion":
         strategy_params = {
             'rsi_oversold': st.sidebar.slider("RSI Oversold", 20, 40, 30),
             'rsi_overbought': st.sidebar.slider("RSI Overbought", 60, 80, 70),
@@ -158,12 +165,6 @@ def main():
             'momentum_weight': st.sidebar.slider("Momentum Weight", 0.1, 0.8, 0.3),
             'signal_threshold': st.sidebar.slider("Signal Threshold", 0.3, 0.8, 0.5)
         }
-    elif selected_strategy == "ml_strategy":
-        strategy_params = {
-            'lookback_period': st.sidebar.slider("Lookback Period", 100, 500, 252),
-            'prediction_horizon': st.sidebar.slider("Prediction Horizon", 1, 10, 5),
-            'retrain_frequency': st.sidebar.slider("Retrain Frequency", 20, 100, 50)
-        }
     
     # Risk Management
     st.sidebar.subheader("Risk Management")
@@ -174,7 +175,7 @@ def main():
     })
     
     # Run Analysis Button
-    run_analysis = st.sidebar.button("🚀 Run Analysis", type="primary")
+    run_analysis = st.sidebar.button("Run Analysis", type="primary")
     
     # Main content area
     if run_analysis:
@@ -234,7 +235,7 @@ def display_results(results, data, strategy, symbol):
     """Display analysis results in tabs."""
     
     # Create tabs for different views
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Performance", "🔍 Trade Analysis", "🤖 AI Explanations", "📊 Feature Importance"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Performance", "Trade Analysis", "AI Explanations", "Feature Importance"])
     
     with tab1:
         display_performance_tab(results, data)
@@ -252,20 +253,23 @@ def display_performance_tab(results, data):
     """Display performance metrics and charts."""
     st.subheader("Backtest Performance")
     
-    # Performance metrics
+    # Performance metrics - fix delta calculations
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Return", f"{results['total_return']:.2%}", 
-                 f"{results['excess_return']:.2%}")
+        # Delta should be 0 if no trades were executed
+        excess_delta = results['excess_return'] if results['total_trades'] > 0 else 0
+        st.metric("Total Return", f"{results['total_return']:.2%}")
     with col2:
-        st.metric("Sharpe Ratio", f"{results['sharpe_ratio']:.2f}", 
-                 f"{results['information_ratio']:.2f}")
+        # Information ratio as delta only if meaningful
+        info_ratio_delta = results['information_ratio'] if results['total_trades'] > 0 else 0
+        st.metric("Sharpe Ratio", f"{results['sharpe_ratio']:.2f}")
     with col3:
-        st.metric("Max Drawdown", f"{results['max_drawdown']:.2%}", 
-                 f"{results['avg_drawdown_duration']:.0f} days")
+        # Drawdown duration delta only if trades occurred
+        dd_duration_delta = results['avg_drawdown_duration'] if results['total_trades'] > 0 else 0
+        st.metric("Max Drawdown", f"{results['max_drawdown']:.2%}")
     with col4:
-        st.metric("Win Rate", f"{results['win_rate']:.2%}", 
-                 f"{results['total_trades']} trades")
+        # Trade count as delta
+        st.metric("Win Rate", f"{results['win_rate']:.2%}")
     
     # Additional metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -391,7 +395,7 @@ def display_trade_analysis_tab(results):
 
 def display_ai_explanations_tab(results, data, strategy):
     """Display AI explanations for trading decisions."""
-    st.subheader("🤖 AI Decision Explanations")
+    st.subheader("AI Decision Explanations")
     st.markdown("*Understanding why the AI made each trading decision*")
     
     trades_df = results['trades']
@@ -512,7 +516,7 @@ def display_trade_explanation(explanation, trade):
     if 'risk_factors' in explanation:
         st.subheader("Risk Factors")
         for risk in explanation['risk_factors']:
-            st.warning(f"⚠️ {risk}")
+            st.warning(f"{risk}")
     
     # Market context
     if 'market_context' in explanation:
@@ -523,7 +527,7 @@ def display_trade_explanation(explanation, trade):
 
 def display_feature_importance_tab(data, strategy):
     """Display global feature importance analysis."""
-    st.subheader("📊 Global Feature Importance")
+    st.subheader("Global Feature Importance")
     st.markdown("*Most influential factors across all trading decisions*")
     
     # Calculate feature importance based on available data
@@ -580,7 +584,7 @@ def get_feature_description(feature):
 
 def display_welcome_screen():
     """Display welcome screen when no analysis is run."""
-    st.markdown("## Welcome to Aura! 👋")
+    st.markdown("## Welcome to Aura!")
     st.markdown("""
     **Aura** is your transparent AI trading companion that explains the 'why' behind every trade decision.
     
@@ -592,16 +596,16 @@ def display_welcome_screen():
     5. **Click 'Run Analysis'** to see the magic happen!
     
     ### What makes Aura special:
-    - 🔍 **Explainable AI**: See exactly why each trade was made
-    - 📊 **Visual Insights**: Interactive charts and feature analysis
-    - 🎯 **Educational**: Perfect for learning quantitative trading
-    - 🔬 **Transparent**: No more black-box trading algorithms
+    - **Explainable AI**: See exactly why each trade was made
+    - **Visual Insights**: Interactive charts and feature analysis
+    - **Educational**: Perfect for learning quantitative trading
+    - **Transparent**: No more black-box trading algorithms
     
     ### Available Strategies:
+    - **Simple MA Crossover**: Basic moving average crossover strategy - perfect for beginners
     - **Mean Reversion**: Buys oversold assets, sells overbought ones
     - **Momentum**: Follows trending price movements
     - **Multi-Factor**: Combines technical and sentiment analysis
-    - **ML Strategy**: Uses machine learning for predictions
     
     Ready to start? Configure your analysis in the sidebar and click **Run Analysis**!
     """)

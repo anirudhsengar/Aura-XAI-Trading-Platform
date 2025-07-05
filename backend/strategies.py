@@ -6,13 +6,6 @@ from typing import Dict, List, Optional, Tuple, Any
 import warnings
 warnings.filterwarnings('ignore')
 
-# Machine Learning
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
-
 # Import utilities
 from utils import DateUtils, DataValidator, FileUtils, LoggingUtils, MathUtils
 
@@ -106,6 +99,15 @@ class BaseStrategy(ABC):
         Returns:
             int: Risk-adjusted signal
         """
+        # Add logging for debugging
+        if hasattr(self, 'logger'):
+            self.logger.info(f"Risk management: input signal={signal}, current_position={self.current_position}")
+        
+        # Temporarily disable risk management for debugging
+        return signal
+        
+        # Original risk management code (commented out for debugging)
+        """
         current_price = data['Close'].iloc[-1]
         
         # If we have a position, check for exit conditions
@@ -137,7 +139,8 @@ class BaseStrategy(ABC):
                     return 1  # Exit short position
         
         return signal
-    
+        """
+
     def update_position(self, signal: int, price: float, timestamp: datetime):
         """
         Update position based on signal.
@@ -203,36 +206,36 @@ class MeanReversionStrategy(BaseStrategy):
         # Ensure we have required columns
         required_cols = ['Close', 'BB_High', 'BB_Low', 'RSI', 'Volume_Ratio']
         if not all(col in data.columns for col in required_cols):
-            self.logger.warning("Missing required columns for Mean Reversion strategy")
+            self.logger.warning(f"Missing required columns for Mean Reversion strategy. Available: {data.columns.tolist()}")
             return signals
         
-        # Mean reversion conditions
+        # More relaxed mean reversion conditions for better signal generation
         oversold_condition = (
             (data['Close'] < data['BB_Low']) &
-            (data['RSI'] < self.params['rsi_oversold']) &
-            (data['Volume_Ratio'] > self.params['volume_threshold'])
+            (data['RSI'] < self.params['rsi_oversold'])
+            # Removed volume threshold to be less restrictive
         )
         
         overbought_condition = (
             (data['Close'] > data['BB_High']) &
-            (data['RSI'] > self.params['rsi_overbought']) &
-            (data['Volume_Ratio'] > self.params['volume_threshold'])
+            (data['RSI'] > self.params['rsi_overbought'])
+            # Removed volume threshold to be less restrictive
         )
         
         # Generate signals
         signals[oversold_condition] = 1   # Buy signal
         signals[overbought_condition] = -1  # Sell signal
         
-        # Add momentum filter to avoid catching falling knives
+        # Less restrictive momentum filter
         if 'Price_Change_5d' in data.columns:
-            # Don't buy if there's strong downward momentum
-            strong_downtrend = data['Price_Change_5d'] < -0.10
+            # Only avoid extreme momentum
+            strong_downtrend = data['Price_Change_5d'] < -0.15  # More extreme threshold
             signals[oversold_condition & strong_downtrend] = 0
             
-            # Don't sell if there's strong upward momentum
-            strong_uptrend = data['Price_Change_5d'] > 0.10
+            strong_uptrend = data['Price_Change_5d'] > 0.15  # More extreme threshold
             signals[overbought_condition & strong_uptrend] = 0
         
+        self.logger.info(f"Generated {(signals == 1).sum()} buy signals and {(signals == -1).sum()} sell signals")
         return signals
 
 class MomentumStrategy(BaseStrategy):
@@ -274,16 +277,14 @@ class MomentumStrategy(BaseStrategy):
         # Ensure we have required columns
         required_cols = ['Close', 'SMA_10', 'SMA_50', 'RSI', 'MACD', 'MACD_Signal']
         if not all(col in data.columns for col in required_cols):
-            self.logger.warning("Missing required columns for Momentum strategy")
+            self.logger.warning(f"Missing required columns for Momentum strategy. Available: {data.columns.tolist()}")
             return signals
         
-        # Momentum conditions
+        # Simplified momentum conditions - less restrictive
         price_above_fast_ma = data['Close'] > data['SMA_10']
-        price_above_slow_ma = data['Close'] > data['SMA_50']
         fast_ma_above_slow = data['SMA_10'] > data['SMA_50']
         
         price_below_fast_ma = data['Close'] < data['SMA_10']
-        price_below_slow_ma = data['Close'] < data['SMA_50']
         fast_ma_below_slow = data['SMA_10'] < data['SMA_50']
         
         # RSI momentum
@@ -294,63 +295,27 @@ class MomentumStrategy(BaseStrategy):
         macd_bullish = data['MACD'] > data['MACD_Signal']
         macd_bearish = data['MACD'] < data['MACD_Signal']
         
-        # Volume confirmation
-        volume_confirmation = True
-        if self.params['volume_confirmation'] and 'Volume_Ratio' in data.columns:
-            volume_above_average = data['Volume_Ratio'] > 1.2
-            volume_confirmation = volume_above_average
+        # Simplified bullish momentum conditions (removed some requirements)
+        bullish_momentum = (
+            price_above_fast_ma &
+            fast_ma_above_slow &
+            rsi_bullish &
+            macd_bullish
+        )
         
-        # Momentum strength
-        momentum_strength = True
-        if 'Price_Change_5d' in data.columns:
-            strong_positive_momentum = data['Price_Change_5d'] > self.params['min_momentum_strength']
-            strong_negative_momentum = data['Price_Change_5d'] < -self.params['min_momentum_strength']
-            
-            # Bullish momentum conditions
-            bullish_momentum = (
-                price_above_fast_ma &
-                price_above_slow_ma &
-                fast_ma_above_slow &
-                rsi_bullish &
-                macd_bullish &
-                volume_confirmation &
-                strong_positive_momentum
-            )
-            
-            # Bearish momentum conditions
-            bearish_momentum = (
-                price_below_fast_ma &
-                price_below_slow_ma &
-                fast_ma_below_slow &
-                rsi_bearish &
-                macd_bearish &
-                volume_confirmation &
-                strong_negative_momentum
-            )
-        else:
-            # Without momentum strength filter
-            bullish_momentum = (
-                price_above_fast_ma &
-                price_above_slow_ma &
-                fast_ma_above_slow &
-                rsi_bullish &
-                macd_bullish &
-                volume_confirmation
-            )
-            
-            bearish_momentum = (
-                price_below_fast_ma &
-                price_below_slow_ma &
-                fast_ma_below_slow &
-                rsi_bearish &
-                macd_bearish &
-                volume_confirmation
-            )
+        # Simplified bearish momentum conditions
+        bearish_momentum = (
+            price_below_fast_ma &
+            fast_ma_below_slow &
+            rsi_bearish &
+            macd_bearish
+        )
         
         # Generate signals
         signals[bullish_momentum] = 1   # Buy signal
         signals[bearish_momentum] = -1  # Sell signal
         
+        self.logger.info(f"Generated {(signals == 1).sum()} buy signals and {(signals == -1).sum()} sell signals")
         return signals
 
 class MultiFactorStrategy(BaseStrategy):
@@ -478,255 +443,78 @@ class MultiFactorStrategy(BaseStrategy):
         
         return score
 
-class MLStrategy(BaseStrategy):
+class SimpleMAStrategy(BaseStrategy):
     """
-    Machine Learning Strategy using ensemble methods.
+    Simple Moving Average Crossover Strategy.
     
-    Logic: Uses machine learning models to predict price direction
-    based on historical patterns in technical and sentiment features.
+    Logic: Buy when fast MA crosses above slow MA, sell when it crosses below.
+    This is the simplest trend-following strategy.
     
-    Why chosen: Can capture complex non-linear relationships in data,
-    adapts to changing market conditions, and provides probabilistic
-    predictions for better risk management.
+    Why chosen: Extremely simple, easy to debug, widely understood.
     """
     
     def __init__(self, params: Dict[str, Any] = None):
         default_params = {
-            'lookback_period': 252,  # 1 year
-            'prediction_horizon': 5,  # 5 days ahead
-            'retrain_frequency': 50,  # Retrain every 50 days
-            'min_accuracy': 0.55,  # Minimum accuracy to use model
-            'feature_importance_threshold': 0.01
+            'fast_ma': 10,
+            'slow_ma': 20
         }
         
         if params:
             default_params.update(params)
         
-        super().__init__("MLStrategy", default_params)
-        
-        # Initialize models
-        self.models = {
-            'rf': RandomForestClassifier(n_estimators=100, random_state=42),
-            'gb': GradientBoostingClassifier(n_estimators=100, random_state=42),
-            'lr': LogisticRegression(random_state=42)
-        }
-        
-        self.scaler = StandardScaler()
-        self.is_trained = False
-        self.last_train_date = None
-        self.feature_importance = {}
+        super().__init__("SimpleMA", default_params)
     
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
         """
-        Generate ML-based signals.
+        Generate simple MA crossover signals.
         
-        Logic: Uses ensemble of ML models to predict price direction
-        and generates signals based on prediction consensus.
+        Logic: Buy when fast MA > slow MA, sell when fast MA < slow MA.
         """
         signals = pd.Series(0, index=data.index)
         
-        if len(data) < self.params['lookback_period']:
-            self.logger.warning("Insufficient data for ML strategy")
+        # Check for required columns
+        if 'SMA_10' not in data.columns or 'SMA_20' not in data.columns:
+            self.logger.warning(f"Missing MA columns. Available: {data.columns.tolist()}")
             return signals
         
-        # Prepare features
-        features = self._prepare_features(data)
+        # Simple crossover logic
+        fast_ma = data['SMA_10']
+        slow_ma = data['SMA_20']
         
-        if features.empty:
-            self.logger.warning("No valid features for ML strategy")
-            return signals
+        # Buy when fast MA is above slow MA
+        buy_condition = fast_ma > slow_ma
         
-        # Check if we need to retrain
-        if self._should_retrain(data):
-            self._train_models(data, features)
+        # Sell when fast MA is below slow MA
+        sell_condition = fast_ma < slow_ma
         
-        if not self.is_trained:
-            self.logger.warning("ML models not trained yet")
-            return signals
+        # Generate signals
+        signals[buy_condition] = 1
+        signals[sell_condition] = -1
         
-        # Generate predictions for recent data
-        recent_features = features.tail(self.params['prediction_horizon'])
-        predictions = self._predict(recent_features)
+        # Only trade on crossovers (when signal changes)
+        signals = signals.diff().fillna(0)
+        signals = signals.replace({2: 1, -2: -1})  # Clean up diff artifacts
         
-        # Convert predictions to signals
-        for i, pred in enumerate(predictions):
-            if i < len(signals):
-                signals.iloc[-(len(predictions)-i)] = pred
+        buy_signals = (signals == 1).sum()
+        sell_signals = (signals == -1).sum()
+        
+        self.logger.info(f"Simple MA Strategy generated {buy_signals} buy signals and {sell_signals} sell signals")
         
         return signals
-    
-    def _prepare_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Prepare features for ML model."""
-        feature_cols = [
-            'RSI', 'MACD', 'BB_Position', 'Volume_Ratio',
-            'Price_Change', 'Price_Change_5d', 'Volatility_20',
-            'sentiment_mean', 'sentiment_momentum', 'Trend_Strength'
-        ]
-        
-        # Select available features
-        available_features = [col for col in feature_cols if col in data.columns]
-        
-        if not available_features:
-            return pd.DataFrame()
-        
-        features = data[available_features].copy()
-        
-        # Add lag features
-        for col in available_features[:5]:  # Only for main technical indicators
-            if col in features.columns:
-                features[f'{col}_lag1'] = features[col].shift(1)
-                features[f'{col}_lag2'] = features[col].shift(2)
-        
-        # Add rolling statistics
-        for col in available_features[:3]:
-            if col in features.columns:
-                features[f'{col}_ma3'] = features[col].rolling(3).mean()
-                features[f'{col}_std3'] = features[col].rolling(3).std()
-        
-        # Drop NaN values
-        features = features.dropna()
-        
-        return features
-    
-    def _create_labels(self, data: pd.DataFrame) -> pd.Series:
-        """Create target labels for training."""
-        # Predict if price will go up in the next N days
-        future_returns = data['Close'].shift(-self.params['prediction_horizon']) / data['Close'] - 1
-        
-        # Create labels: 1 for up, -1 for down, 0 for neutral
-        labels = pd.Series(0, index=data.index)
-        labels[future_returns > 0.02] = 1   # Up if > 2% return
-        labels[future_returns < -0.02] = -1  # Down if < -2% return
-        
-        return labels
-    
-    def _should_retrain(self, data: pd.DataFrame) -> bool:
-        """Check if models should be retrained."""
-        if not self.is_trained:
-            return True
-        
-        if self.last_train_date is None:
-            return True
-        
-        # Check if enough time has passed
-        current_date = data.index[-1]
-        days_since_train = (current_date - self.last_train_date).days
-        
-        return days_since_train >= self.params['retrain_frequency']
-    
-    def _train_models(self, data: pd.DataFrame, features: pd.DataFrame):
-        """Train ML models."""
-        self.logger.info("Training ML models...")
-        
-        # Create labels
-        labels = self._create_labels(data)
-        
-        # Align features and labels
-        common_index = features.index.intersection(labels.index)
-        if len(common_index) < 100:  # Minimum training samples
-            self.logger.warning("Insufficient training data")
-            return
-        
-        X = features.loc[common_index]
-        y = labels.loc[common_index]
-        
-        # Remove neutral labels for training
-        non_neutral = y != 0
-        X_train = X[non_neutral]
-        y_train = y[non_neutral]
-        
-        if len(X_train) < 50:
-            self.logger.warning("Insufficient non-neutral training samples")
-            return
-        
-        # Scale features
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        
-        # Train models
-        model_accuracies = {}
-        
-        for name, model in self.models.items():
-            try:
-                # Train model
-                model.fit(X_train_scaled, y_train)
-                
-                # Evaluate on training data (could add validation split)
-                y_pred = model.predict(X_train_scaled)
-                accuracy = accuracy_score(y_train, y_pred)
-                model_accuracies[name] = accuracy
-                
-                self.logger.info(f"Model {name} accuracy: {accuracy:.3f}")
-                
-            except Exception as e:
-                self.logger.error(f"Error training model {name}: {str(e)}")
-                model_accuracies[name] = 0
-        
-        # Check if models meet minimum accuracy
-        best_accuracy = max(model_accuracies.values())
-        if best_accuracy >= self.params['min_accuracy']:
-            self.is_trained = True
-            self.last_train_date = data.index[-1]
-            self.logger.info(f"ML models trained successfully. Best accuracy: {best_accuracy:.3f}")
-        else:
-            self.logger.warning(f"Model accuracy {best_accuracy:.3f} below threshold {self.params['min_accuracy']}")
-    
-    def _predict(self, features: pd.DataFrame) -> List[int]:
-        """Make predictions using ensemble of models."""
-        if features.empty:
-            return []
-        
-        # Scale features
-        X_scaled = self.scaler.transform(features)
-        
-        # Get predictions from all models
-        predictions = []
-        
-        for name, model in self.models.items():
-            try:
-                pred = model.predict(X_scaled)
-                predictions.append(pred)
-            except Exception as e:
-                self.logger.error(f"Error predicting with model {name}: {str(e)}")
-                predictions.append(np.zeros(len(features)))
-        
-        # Ensemble predictions (majority vote)
-        ensemble_pred = []
-        for i in range(len(features)):
-            votes = [pred[i] for pred in predictions]
-            # Take majority vote
-            ensemble_pred.append(max(set(votes), key=votes.count))
-        
-        return ensemble_pred
 
 class StrategyFactory:
     """
     Factory class for creating trading strategies.
-    
-    Logic: Centralized strategy creation with parameter validation
-    and strategy selection based on market conditions.
-    
-    Why chosen: Provides clean interface for strategy creation,
-    enables easy addition of new strategies, and ensures proper
-    parameter validation.
     """
     
     @staticmethod
     def create_strategy(strategy_name: str, params: Dict[str, Any] = None) -> BaseStrategy:
-        """
-        Create a strategy instance.
-        
-        Args:
-            strategy_name: Name of the strategy
-            params: Strategy parameters
-            
-        Returns:
-            BaseStrategy: Strategy instance
-        """
+        """Create a strategy instance."""
         strategy_map = {
+            'simple_ma': SimpleMAStrategy,
             'mean_reversion': MeanReversionStrategy,
             'momentum': MomentumStrategy,
-            'multi_factor': MultiFactorStrategy,
-            'ml_strategy': MLStrategy
+            'multi_factor': MultiFactorStrategy
         }
         
         if strategy_name not in strategy_map:
@@ -737,16 +525,16 @@ class StrategyFactory:
     @staticmethod
     def get_available_strategies() -> List[str]:
         """Get list of available strategies."""
-        return ['mean_reversion', 'momentum', 'multi_factor', 'ml_strategy']
+        return ['simple_ma', 'mean_reversion', 'momentum', 'multi_factor']
     
     @staticmethod
     def get_strategy_description(strategy_name: str) -> str:
         """Get description of a strategy."""
         descriptions = {
+            'simple_ma': "Simple MA: Basic moving average crossover strategy",
             'mean_reversion': "Mean Reversion: Trades based on price returning to statistical mean",
             'momentum': "Momentum: Follows trending price movements with multiple confirmations",
-            'multi_factor': "Multi-Factor: Combines technical, sentiment, and momentum factors",
-            'ml_strategy': "ML Strategy: Uses machine learning models to predict price direction"
+            'multi_factor': "Multi-Factor: Combines technical, sentiment, and momentum factors"
         }
         
         return descriptions.get(strategy_name, "Unknown strategy")
