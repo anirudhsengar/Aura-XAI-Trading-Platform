@@ -1,52 +1,34 @@
 import pandas as pd
 import numpy as np
 import ta
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
 import warnings
-from pathlib import Path
-warnings.filterwarnings('ignore')
-
-# NLP and sentiment analysis
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
-import torch
-from textblob import TextBlob
 import re
+from utils import DataValidator, LoggingUtils
+from textblob import TextBlob
 
-# Import utilities
-from utils import DateUtils, DataValidator, FileUtils, LoggingUtils, MathUtils
+warnings.filterwarnings('ignore')
 
 class FeatureEngine:
     """
     Feature Engine for calculating technical indicators and sentiment analysis.
     """
     
-    def __init__(self, cache_dir: str = "../data", log_level: str = "INFO"):
+    def __init__(self, log_level: str = "INFO"):
         """
-        Initialize FeatureEngine with caching and logging.
+        Initialize FeatureEngine with logging.
         
         Args:
-            cache_dir: Directory for caching computed features
             log_level: Logging level
-        """
-        self.cache_dir = Path(cache_dir) if isinstance(cache_dir, str) else cache_dir
-        self.features_cache_dir = self.cache_dir / "features"
-        
-        # Ensure directories exist
-        FileUtils.ensure_directory_exists(str(self.features_cache_dir))
-        
+        """        
         # Setup logging
         self.logger = LoggingUtils.setup_logger(
             "FeatureEngine", 
-            log_file=str(self.cache_dir.parent / "logs" / "feature_engine.log"),
+            log_file=str("./logs" / "feature_engine.log"),
             level=log_level
         )
         
         # Initialize sentiment analysis models
         self._initialize_sentiment_models()
-        
-        # Configuration
-        self.cache_duration_hours = 24
         
         self.logger.info("FeatureEngine initialized successfully")
     
@@ -58,7 +40,6 @@ class FeatureEngine:
         complex ML dependencies.
         """
         try:
-            # Use only TextBlob for sentiment analysis
             from textblob import TextBlob
             self.sentiment_pipeline = None  # No complex ML pipeline
             self.logger.info("Using TextBlob for sentiment analysis")
@@ -67,14 +48,12 @@ class FeatureEngine:
             self.logger.warning(f"Failed to load TextBlob: {str(e)}")
             self.sentiment_pipeline = None
     
-    def calculate_technical_indicators(self, df: pd.DataFrame, symbol: str = None) -> pd.DataFrame:
+    def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate comprehensive technical indicators for market data.
         
         Args:
-            df: DataFrame with OHLCV data
-            symbol: Stock symbol for caching (optional)
-            
+            df: DataFrame with OHLCV data            
         Returns:
             pd.DataFrame: DataFrame with technical indicators added
         """
@@ -82,16 +61,7 @@ class FeatureEngine:
         if not DataValidator.validate_ohlcv_data(df):
             raise ValueError("Invalid OHLCV data provided")
         
-        # Check cache if symbol is provided
-        if symbol:
-            cache_file = self.features_cache_dir / f"{symbol}_technical_indicators.parquet"
-            if cache_file.exists():
-                file_age = datetime.now() - datetime.fromtimestamp(cache_file.stat().st_mtime)
-                if file_age.total_seconds() < self.cache_duration_hours * 3600:
-                    self.logger.info(f"Loading cached technical indicators for {symbol}")
-                    return FileUtils.load_dataframe(str(cache_file), format='parquet')
-        
-        self.logger.info(f"Calculating technical indicators for {symbol or 'data'}")
+        self.logger.info(f"Calculating technical indicators for data")
         
         # Create a copy to avoid modifying original data
         result_df = df.copy()
@@ -195,23 +165,16 @@ class FeatureEngine:
             (result_df['MACD'].shift(1) >= result_df['MACD_Signal'].shift(1))
         ).astype(int)
         
-        # Cache the results if symbol is provided
-        if symbol:
-            FileUtils.save_dataframe(result_df, str(cache_file), format='parquet')
-            self.logger.info(f"Cached technical indicators for {symbol}")
-        
         self.logger.info(f"Calculated {len(result_df.columns) - len(df.columns)} technical indicators")
         
         return result_df
     
-    def calculate_sentiment_features(self, news_df: pd.DataFrame, symbol: str = None) -> pd.DataFrame:
+    def calculate_sentiment_features(self, news_df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate sentiment features from news data.
         
         Args:
-            news_df: DataFrame with news data
-            symbol: Stock symbol for caching (optional)
-            
+            news_df: DataFrame with news data            
         Returns:
             pd.DataFrame: DataFrame with sentiment features by date
         """
@@ -219,16 +182,7 @@ class FeatureEngine:
             self.logger.warning("No news data provided for sentiment analysis")
             return pd.DataFrame()
         
-        # Check cache if symbol is provided
-        if symbol:
-            cache_file = self.features_cache_dir / f"{symbol}_sentiment_features.parquet"
-            if cache_file.exists():
-                file_age = datetime.now() - datetime.fromtimestamp(cache_file.stat().st_mtime)
-                if file_age.total_seconds() < self.cache_duration_hours * 3600:
-                    self.logger.info(f"Loading cached sentiment features for {symbol}")
-                    return FileUtils.load_dataframe(str(cache_file), format='parquet')
-        
-        self.logger.info(f"Calculating sentiment features for {symbol or 'data'}")
+        self.logger.info(f"Calculating sentiment features for data")
         
         # Create a copy to work with
         sentiment_df = news_df.copy()
@@ -295,11 +249,6 @@ class FeatureEngine:
         daily_sentiment['date'] = pd.to_datetime(daily_sentiment['date'])
         daily_sentiment.set_index('date', inplace=True)
         
-        # Cache the results if symbol is provided
-        if symbol:
-            FileUtils.save_dataframe(daily_sentiment, str(cache_file), format='parquet')
-            self.logger.info(f"Cached sentiment features for {symbol}")
-        
         self.logger.info(f"Calculated sentiment features for {len(daily_sentiment)} days")
         
         return daily_sentiment
@@ -307,9 +256,6 @@ class FeatureEngine:
     def combine_features(self, market_data: pd.DataFrame, sentiment_data: pd.DataFrame) -> pd.DataFrame:
         """
         Combine market data with sentiment features.
-        
-        Logic: Merges technical indicators with sentiment features,
-        handling missing data and creating interaction features.
         
         Args:
             market_data: DataFrame with market data and technical indicators
@@ -387,8 +333,6 @@ class FeatureEngine:
             return 0.0
         
         try:
-            # Use TextBlob only
-            from textblob import TextBlob
             blob = TextBlob(text)
             return blob.sentiment.polarity
                 
@@ -465,58 +409,3 @@ class FeatureEngine:
             levels = df['High'].rolling(window=window, center=True).max()
         
         return levels
-
-# Example usage and testing
-if __name__ == "__main__":
-    from pathlib import Path
-    
-    # Initialize FeatureEngine
-    fe = FeatureEngine()
-    
-    # Test with sample data
-    print("Testing FeatureEngine...")
-    
-    # Create sample market data
-    dates = pd.date_range(start='2024-01-01', periods=100, freq='D')
-    sample_market_data = pd.DataFrame({
-        'Open': np.random.randn(100).cumsum() + 100,
-        'High': np.random.randn(100).cumsum() + 102,
-        'Low': np.random.randn(100).cumsum() + 98,
-        'Close': np.random.randn(100).cumsum() + 100,
-        'Volume': np.random.randint(1000000, 10000000, 100)
-    }, index=dates)
-    
-    # Ensure High >= Low >= Close relationships
-    sample_market_data['High'] = sample_market_data[['Open', 'High', 'Low', 'Close']].max(axis=1)
-    sample_market_data['Low'] = sample_market_data[['Open', 'High', 'Low', 'Close']].min(axis=1)
-    
-    try:
-        # Test technical indicators
-        print("Testing technical indicators...")
-        technical_features = fe.calculate_technical_indicators(sample_market_data, "TEST")
-        print(f"Technical features shape: {technical_features.shape}")
-        print(f"Added {technical_features.shape[1] - sample_market_data.shape[1]} indicators")
-        
-        # Create sample news data
-        sample_news_data = pd.DataFrame({
-            'date': pd.date_range(start='2024-01-01', periods=50, freq='D'),
-            'headline': [f"Stock news headline {i}" for i in range(50)],
-            'summary': [f"Stock news summary {i}" for i in range(50)]
-        })
-        
-        # Test sentiment features
-        print("\nTesting sentiment analysis...")
-        sentiment_features = fe.calculate_sentiment_features(sample_news_data, "TEST")
-        print(f"Sentiment features shape: {sentiment_features.shape}")
-        
-        # Test combined features
-        print("\nTesting feature combination...")
-        combined_features = fe.combine_features(technical_features, sentiment_features)
-        print(f"Combined features shape: {combined_features.shape}")
-        
-        print("\nFeatureEngine testing completed successfully!")
-        
-    except Exception as e:
-        print(f"Error during testing: {str(e)}")
-        import traceback
-        traceback.print_exc()
