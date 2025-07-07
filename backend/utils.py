@@ -184,7 +184,7 @@ class MathUtils:
             prices: Series of prices
             
         Returns:
-            pd.Series: Simple returns
+            pd.Series: Simple returns of len n - 1 as initial capital is taken as the benchmark
         """
         return prices.pct_change().dropna()
     
@@ -219,19 +219,19 @@ class MathUtils:
         return vol
     
     @staticmethod
-    def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.02) -> float:
+    def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.044) -> float:
         """
         Calculate Sharpe ratio.
         
         Args:
             returns: Series of returns
-            risk_free_rate: Risk-free rate (default 2%)
+            risk_free_rate: Risk-free rate i.e. 4.40% in the UAE
             
         Returns:
             float: Sharpe ratio
         """
         excess_returns = returns - risk_free_rate / 252  # Daily risk-free rate
-        return excess_returns.mean() / excess_returns.std() * np.sqrt(252)
+        return excess_returns.mean() / MathUtils.calculate_volatility(excess_returns, True)
     
     @staticmethod
     def calculate_max_drawdown(equity_curve: pd.Series) -> float:
@@ -246,7 +246,7 @@ class MathUtils:
         """
         peak = equity_curve.expanding().max()
         drawdown = (equity_curve - peak) / peak
-        return drawdown.min()
+        return drawdown.min() # Since drawdown is negative
     
     @staticmethod
     def calculate_win_rate(trades: pd.Series) -> float:
