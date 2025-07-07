@@ -3,28 +3,19 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 import warnings
-warnings.filterwarnings('ignore')
-
-# Import utilities and strategies
-from utils import DateUtils, DataValidator, FileUtils, LoggingUtils, MathUtils
+from utils import DataValidator, LoggingUtils, MathUtils
 from strategies import BaseStrategy
+
+warnings.filterwarnings('ignore')
 
 class BacktestEngine:
     """
     Comprehensive backtesting engine for trading strategies.
-    
-    Logic: Simulates trading strategy execution on historical data with
-    realistic transaction costs, slippage, and risk management. Provides
-    detailed performance analytics and trade-by-trade analysis.
-    
-    Why chosen: Realistic backtesting is crucial for strategy validation.
-    This engine provides institutional-grade backtesting capabilities
-    with proper position management and performance attribution.
     """
     
     def __init__(self, initial_capital: float = 100000, 
                  commission_rate: float = 0.001,
-                 slippage_rate: float = 0.0005,
+                 slippage_rate: float = 0.0005, # 0.05% difference is acceptable
                  log_level: str = "INFO"):
         """
         Initialize backtesting engine.
@@ -45,7 +36,7 @@ class BacktestEngine:
             level=log_level
         )
         
-        # Portfolio state
+        # Reset portfolio state
         self.reset_portfolio()
         
         self.logger.info(f"BacktestEngine initialized with ${initial_capital:,.2f} capital")
@@ -72,9 +63,6 @@ class BacktestEngine:
                     symbol: str) -> Dict[str, Any]:
         """
         Run complete backtest for a strategy.
-        
-        Logic: Executes strategy on historical data, managing positions,
-        calculating performance metrics, and providing detailed analysis.
         
         Args:
             strategy: Trading strategy to test
@@ -142,15 +130,12 @@ class BacktestEngine:
             if signal == 0:
                 continue
                 
-            self.logger.info(f"Processing signal {signal} on {date}")
-            
-            # Simplified risk management - just pass through
-            adjusted_signal = signal
+            self.logger.info(f"Processing signal {"Buy" if signal > 0 else "Sell" if signal < 0 else "Hold"} on {date}")
             
             # Execute trade
-            if adjusted_signal != 0:
-                self.logger.info(f"Executing trade: {adjusted_signal}")
-                self._execute_trade(adjusted_signal, row, date, symbol, strategy)
+            if signal != 0:
+                self.logger.info(f"Executing trade: {"Buy" if signal > 0 else "Sell" if signal < 0 else "Hold"}")
+                self._execute_trade(signal, row, date, symbol, strategy)
                 executed_trades += 1
             
             # Update portfolio value
@@ -160,7 +145,7 @@ class BacktestEngine:
 
     def _execute_trade(self, signal: int, market_data: pd.Series, 
                       date: datetime, symbol: str, strategy: BaseStrategy):
-        """Execute a single trade - simplified version."""
+        """Execute a single trade"""
         
         # Get price
         price = market_data['Close']
@@ -169,30 +154,27 @@ class BacktestEngine:
         current_position = self.positions.get(symbol, 0)
         
         if signal > 0:  # Buy signal
-            # Only buy if we don't have a position
+            # Only buy if we don't have a position i.e. we are holding
             if current_position == 0:
                 # Use fixed position size
-                max_investment = self.cash * 0.95  # Use 95% of cash
+                max_investment = self.cash * 0.60  # Use 60% of cash
                 shares_to_buy = int(max_investment / price)
                 
+                # If we can afford to buy the shares
                 if shares_to_buy > 0:
                     trade_value = shares_to_buy * price
+            
+                    self.cash -= trade_value
+                    self.positions[symbol] = shares_to_buy
                     
-                    if trade_value <= self.cash:
-                        # Execute buy
-                        self.cash -= trade_value
-                        self.positions[symbol] = shares_to_buy
-                        
-                        # Record trade
-                        self._record_trade(date, symbol, 'BUY', shares_to_buy, price, 0, 0)
-                        
-                        self.logger.info(f"BUY: {shares_to_buy} shares at ${price:.2f}")
-                    else:
-                        self.logger.warning(f"Insufficient cash: need ${trade_value:.2f}, have ${self.cash:.2f}")
+                    # Record trade
+                    self._record_trade(date, symbol, 'BUY', shares_to_buy, price, 0, 0)
+                    
+                    self.logger.info(f"BUY: {shares_to_buy} shares at ${price:.2f}")
                 else:
                     self.logger.warning(f"No shares calculated for purchase")
             else:
-                self.logger.info(f"Already holding position, skipping buy")
+                self.logger.info(f"Already holding position, skipping Buy")
                 
         elif signal < 0:  # Sell signal
             # Only sell if we have a position
@@ -235,7 +217,7 @@ class BacktestEngine:
             # Find corresponding buy trade
             for prev_trade in reversed(self.trades[:-1]):
                 if prev_trade['symbol'] == symbol and prev_trade['action'] == 'BUY':
-                    pnl = (price - prev_trade['price']) * shares - commission - prev_trade['commission']
+                    pnl = ((price - prev_trade['price']) * shares) - commission - prev_trade['commission']
                     trade['pnl'] = pnl
                     trade['pnl_pct'] = pnl / (prev_trade['price'] * shares)
                     trade['holding_days'] = (date - prev_trade['date']).days
@@ -256,13 +238,7 @@ class BacktestEngine:
         if symbol in self.positions and self.positions[symbol] > 0:
             position_value = self.positions[symbol] * market_data['Close']
         
-        # Fix: Portfolio value should only change if we have positions
-        if symbol not in self.positions or self.positions[symbol] == 0:
-            # No positions - portfolio value equals cash (should be initial capital)
-            self.portfolio_value = self.initial_capital
-        else:
-            # Have positions - calculate total value
-            self.portfolio_value = self.cash + position_value
+        self.portfolio_value = self.cash + position_value
         
         # Update equity curve
         self.equity_curve.append({
@@ -270,7 +246,7 @@ class BacktestEngine:
             'portfolio_value': self.portfolio_value,
             'cash': self.cash,
             'position_value': position_value,
-            'daily_return': (self.portfolio_value / self.initial_capital) - 1
+            'daily_return': (self.portfolio_value / self.initial_capital) - 1 # Percentage return
         })
         
         # Calculate daily returns
@@ -279,7 +255,7 @@ class BacktestEngine:
             daily_return = (self.portfolio_value - prev_value) / prev_value
             self.daily_returns.append(daily_return)
         else:
-            # First day, no return
+            # First day there is no return
             self.daily_returns.append(0.0)
         
         # Update drawdown
@@ -294,17 +270,16 @@ class BacktestEngine:
         equity_df = pd.DataFrame(self.equity_curve)
         trades_df = pd.DataFrame(self.trades) if self.trades else pd.DataFrame()
         
-        # Fix: If no trades were executed, return should be 0%
+        total_return = (self.portfolio_value - self.initial_capital) / self.initial_capital
+        annualized_return = (self.portfolio_value / self.initial_capital) ** (252 / len(data)) - 1
+
+        # Flag to check if the strategy is working or not
         if self.total_trades == 0:
-            total_return = 0.0
-            annualized_return = 0.0
-        else:
-            total_return = (self.portfolio_value - self.initial_capital) / self.initial_capital
-            annualized_return = (self.portfolio_value / self.initial_capital) ** (252 / len(data)) - 1
+            self.logger.warning(f"No trades executed so the strategy needs adjustment")
         
         # Risk metrics
         returns_series = pd.Series(self.daily_returns)
-        volatility = returns_series.std() * np.sqrt(252) if len(returns_series) > 1 else 0
+        volatility = MathUtils.calculate_volatility(returns_series, True) if len(returns_series) > 1 else 0
         sharpe_ratio = MathUtils.calculate_sharpe_ratio(returns_series) if len(returns_series) > 1 else 0
         
         # Drawdown metrics
@@ -452,56 +427,3 @@ Slippage %:            {results['slippage_pct']:>10.2%}
             report += f"{key}: {value}\n"
         
         return report
-
-# Example usage and testing
-if __name__ == "__main__":
-    from strategies import StrategyFactory
-    
-    # Create sample data
-    print("Testing BacktestEngine...")
-    
-    dates = pd.date_range(start='2024-01-01', periods=100, freq='D')
-    sample_data = pd.DataFrame({
-        'Open': np.random.randn(100).cumsum() + 100,
-        'High': np.random.randn(100).cumsum() + 102,
-        'Low': np.random.randn(100).cumsum() + 98,
-        'Close': np.random.randn(100).cumsum() + 100,
-        'Volume': np.random.randint(1000000, 10000000, 100),
-        'RSI': np.random.uniform(20, 80, 100),
-        'BB_High': np.random.randn(100).cumsum() + 105,
-        'BB_Low': np.random.randn(100).cumsum() + 95,
-        'BB_Position': np.random.uniform(0, 1, 100),
-        'MACD': np.random.randn(100),
-        'MACD_Signal': np.random.randn(100),
-        'Volume_Ratio': np.random.uniform(0.5, 2.0, 100),
-        'SMA_10': np.random.randn(100).cumsum() + 99,
-        'SMA_50': np.random.randn(100).cumsum() + 98,
-        'Price_Change': np.random.randn(100) * 0.02,
-        'Price_Change_5d': np.random.randn(100) * 0.05,
-        'sentiment_mean': np.random.uniform(-0.5, 0.5, 100)
-    }, index=dates)
-    
-    # Ensure proper OHLCV relationships
-    sample_data['High'] = sample_data[['Open', 'High', 'Low', 'Close']].max(axis=1)
-    sample_data['Low'] = sample_data[['Open', 'High', 'Low', 'Close']].min(axis=1)
-    
-    try:
-        # Initialize backtester
-        backtester = BacktestEngine(initial_capital=100000)
-        
-        # Test with mean reversion strategy
-        strategy = StrategyFactory.create_strategy('mean_reversion')
-        
-        # Run backtest
-        results = backtester.run_backtest(strategy, sample_data, 'TEST')
-        
-        # Generate report
-        report = backtester.generate_performance_report(results)
-        print(report)
-        
-        print("\nBacktest completed successfully!")
-        
-    except Exception as e:
-        print(f"Error during backtesting: {str(e)}")
-        import traceback
-        traceback.print_exc()
