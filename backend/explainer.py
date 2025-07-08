@@ -5,8 +5,7 @@ from typing import Dict, List, Any
 import warnings
 import shap
 from sklearn.ensemble import RandomForestClassifier
-from utils import LoggingUtils
-from strategies import BaseStrategy
+from backend.strategies import BaseStrategy
 
 warnings.filterwarnings('ignore')
 
@@ -15,18 +14,10 @@ class Explainer:
     Explainable AI system for trading decision analysis.
     """
     
-    def __init__(self, log_level: str = "INFO"):
+    def __init__(self):
         """
         Initialize the Explainer.
-        
-        Args:
-            log_level: Logging level
         """
-        self.logger = LoggingUtils.setup_logger(
-            "Explainer",
-            level=log_level
-        )
-        
         # Initialize SHAP explainer (will be set based on strategy type)
         self.shap_explainer = None
         self.feature_names = []
@@ -34,8 +25,6 @@ class Explainer:
         
         # Explanation cache
         self.explanation_cache = {}
-        
-        self.logger.info("Explainer initialized successfully")
     
     def explain_trade_decision(self, strategy: BaseStrategy, data: pd.DataFrame,
                               trade_date: datetime, signal: int,
@@ -53,13 +42,10 @@ class Explainer:
         Returns:
             Dict: Comprehensive explanation of the trade decision
         """
-        self.logger.info(f"Explaining trade decision for {trade_date}")
-        
         # Get the data slice for the trade date
         trade_data = self._get_trade_context(data, trade_date, context_window)
         
         if trade_data.empty:
-            self.logger.warning(f"No data available for trade date {trade_date}")
             return {}
         
         # Get the specific row for the trade date
@@ -128,7 +114,6 @@ class Explainer:
             return explanation
             
         except Exception as e:
-            self.logger.error(f"Error in ML explanation: {str(e)}")
             return self._fallback_explanation(trade_row, signal)
     
     def _explain_rule_based_decision(self, strategy: BaseStrategy, data: pd.DataFrame,
@@ -308,7 +293,6 @@ class Explainer:
             return shap_values
             
         except Exception as e:
-            self.logger.error(f"Error calculating SHAP values: {str(e)}")
             # Return zeros if SHAP calculation fails
             return np.zeros((len(feature_data), len(feature_data.columns)))
     
@@ -332,7 +316,6 @@ class Explainer:
             return model
             
         except Exception as e:
-            self.logger.error(f"Error creating explanation model: {str(e)}")
             return None
     
     def _prepare_features_for_shap(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -383,7 +366,6 @@ class Explainer:
             'BB_Position': 'Bollinger Bands Position - price position within bands',
             'Volume_Ratio': 'Volume Ratio - current volume vs. average volume',
             'Price_Change': 'Price Change - recent price movement',
-            'sentiment_mean': 'News Sentiment - average sentiment from news analysis',
             'SMA_10': '10-day Simple Moving Average',
             'SMA_50': '50-day Simple Moving Average',
             'Volatility_20': '20-day Price Volatility'
@@ -510,5 +492,4 @@ class Explainer:
             return data.iloc[start_idx:end_idx]
             
         except Exception as e:
-            self.logger.error(f"Error getting trade context: {str(e)}")
             return pd.DataFrame()

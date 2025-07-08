@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Dict, List, Any
 import warnings
-from utils import LoggingUtils
 
 warnings.filterwarnings('ignore')
 
@@ -23,7 +22,6 @@ class BaseStrategy(ABC):
         """
         self.name = name
         self.params = params or {}
-        self.logger = LoggingUtils.setup_logger(f"Strategy_{name}")
         
         # Risk management parameters
         self.max_position_size = self.params.get('max_position_size', 0.1)  # 10% of portfolio
@@ -35,8 +33,6 @@ class BaseStrategy(ABC):
         self.current_position = 0
         self.entry_price = None
         self.trades = []
-        
-        self.logger.info(f"Strategy {name} initialized with params: {params}")
     
     @abstractmethod
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
@@ -97,24 +93,20 @@ class BaseStrategy(ABC):
             if self.current_position > 0:
                 # Stop loss
                 if pnl_pct <= -self.stop_loss_pct:
-                    self.logger.info(f"Stop loss triggered: {pnl_pct:.2%}")
                     return -1  # Exit long position
                 
                 # Take profit
                 if pnl_pct >= self.take_profit_pct:
-                    self.logger.info(f"Take profit triggered: {pnl_pct:.2%}")
                     return -1  # Exit long position
             
             # Short position risk management
             elif self.current_position < 0:
                 # Stop loss for short
                 if pnl_pct >= self.stop_loss_pct:
-                    self.logger.info(f"Stop loss triggered (short): {pnl_pct:.2%}")
                     return 1  # Exit short position
                 
                 # Take profit for short
                 if pnl_pct <= -self.take_profit_pct:
-                    self.logger.info(f"Take profit triggered (short): {pnl_pct:.2%}")
                     return 1  # Exit short position
         
         return signal
@@ -129,7 +121,6 @@ class BaseStrategy(ABC):
             timestamp: Current timestamp
         """
         if signal != 0:
-            # Log the trade
             trade_info = {
                 'timestamp': timestamp,
                 'signal': signal,
@@ -139,7 +130,6 @@ class BaseStrategy(ABC):
             }
             
             self.trades.append(trade_info)
-            LoggingUtils.log_trade_execution(self.logger, trade_info)
             
             # Update position
             self.current_position = signal
@@ -171,7 +161,6 @@ class SimpleMAStrategy(BaseStrategy):
         
         # Check for required columns
         if 'SMA_10' not in data.columns or 'SMA_20' not in data.columns:
-            self.logger.warning(f"Missing MA columns. Available: {data.columns.tolist()}")
             return signals
         
         # Simple crossover logic
@@ -191,11 +180,6 @@ class SimpleMAStrategy(BaseStrategy):
         # Only trade on crossovers (when signal changes)
         signals = signals.diff().fillna(0)
         signals = signals.replace({2: 1, -2: -1})  # Clean up diff artifacts
-        
-        buy_signals = (signals == 1).sum()
-        sell_signals = (signals == -1).sum()
-        
-        self.logger.info(f"Simple MA Strategy generated {buy_signals} buy signals and {sell_signals} sell signals")
         
         return signals
 
@@ -228,7 +212,6 @@ class MeanReversionStrategy(BaseStrategy):
         # Ensure we have required columns
         required_cols = ['Close', 'BB_High', 'BB_Low', 'RSI', 'Volume_Ratio']
         if not all(col in data.columns for col in required_cols):
-            self.logger.warning(f"Missing required columns for Mean Reversion strategy. Available: {data.columns.tolist()}")
             return signals
         
         # More relaxed mean reversion conditions for better signal generation
@@ -257,7 +240,6 @@ class MeanReversionStrategy(BaseStrategy):
             strong_uptrend = data['Price_Change_5d'] > 0.15  # More extreme threshold
             signals[overbought_condition & strong_uptrend] = 0
         
-        self.logger.info(f"Generated {(signals == 1).sum()} buy signals and {(signals == -1).sum()} sell signals")
         return signals
 
 class MomentumStrategy(BaseStrategy):
@@ -289,7 +271,6 @@ class MomentumStrategy(BaseStrategy):
         # Ensure we have required columns
         required_cols = ['Close', 'SMA_10', 'SMA_50', 'RSI', 'MACD', 'MACD_Signal']
         if not all(col in data.columns for col in required_cols):
-            self.logger.warning(f"Missing required columns for Momentum strategy. Available: {data.columns.tolist()}")
             return signals
         
         # Simplified momentum conditions - less restrictive
@@ -327,125 +308,7 @@ class MomentumStrategy(BaseStrategy):
         signals[bullish_momentum] = 1   # Buy signal
         signals[bearish_momentum] = -1  # Sell signal
         
-        self.logger.info(f"Generated {(signals == 1).sum()} buy signals and {(signals == -1).sum()} sell signals")
         return signals
-
-class MultiFactorStrategy(BaseStrategy):
-    """
-    Multi-Factor Strategy combining technical indicators with sentiment.
-    """
-    
-    def __init__(self, params: Dict[str, Any] = None):
-        default_params = {
-            'technical_weight': 0.4,
-            'sentiment_weight': 0.3,
-            'momentum_weight': 0.3,
-            'sentiment_threshold': 0.1,
-            'signal_threshold': 0.5
-        }
-        
-        if params:
-            default_params.update(params)
-        
-        super().__init__("MultiFactor", default_params)
-    
-    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
-        """
-        Generate multi-factor signals by combining different components.
-        
-        Logic: Weights different factors and combines them into a
-        composite signal score.
-        """
-        signals = pd.Series(0, index=data.index)
-        
-        # Technical factor
-        technical_score = self._calculate_technical_score(data)
-        
-        # Sentiment factor
-        sentiment_score = self._calculate_sentiment_score(data)
-        
-        # Momentum factor
-        momentum_score = self._calculate_momentum_score(data)
-        
-        # Combine factors
-        composite_score = (
-            technical_score * self.params['technical_weight'] +
-            sentiment_score * self.params['sentiment_weight'] +
-            momentum_score * self.params['momentum_weight']
-        )
-        
-        # Generate signals based on composite score
-        buy_condition = composite_score > self.params['signal_threshold']
-        sell_condition = composite_score < -self.params['signal_threshold']
-        
-        signals[buy_condition] = 1
-        signals[sell_condition] = -1
-        
-        return signals
-    
-    def _calculate_technical_score(self, data: pd.DataFrame) -> pd.Series:
-        """Calculate technical analysis score."""
-        score = pd.Series(0.0, index=data.index)
-        
-        # RSI component
-        if 'RSI' in data.columns:
-            rsi_score = (data['RSI'] - 50) / 50  # Normalize to [-1, 1]
-            score += rsi_score * 0.3
-        
-        # Bollinger Bands component
-        if 'BB_Position' in data.columns:
-            bb_score = (data['BB_Position'] - 0.5) * 2  # Normalize to [-1, 1]
-            score += bb_score * 0.3
-        
-        # MACD component
-        if 'MACD' in data.columns and 'MACD_Signal' in data.columns:
-            macd_diff = data['MACD'] - data['MACD_Signal']
-            macd_score = np.tanh(macd_diff * 10)  # Normalize with tanh
-            score += macd_score * 0.4
-        
-        return score
-    
-    def _calculate_sentiment_score(self, data: pd.DataFrame) -> pd.Series:
-        """Calculate sentiment score."""
-        score = pd.Series(0.0, index=data.index)
-        
-        if 'sentiment_mean' in data.columns:
-            # Normalize sentiment score
-            sentiment_score = np.tanh(data['sentiment_mean'] * 5)
-            score += sentiment_score * 0.5
-        
-        if 'sentiment_momentum' in data.columns:
-            # Add sentiment momentum
-            momentum_score = np.tanh(data['sentiment_momentum'] * 10)
-            score += momentum_score * 0.3
-        
-        if 'news_count' in data.columns:
-            # Add news volume factor
-            news_score = np.tanh((data['news_count'] - data['news_count'].mean()) / data['news_count'].std())
-            score += news_score * 0.2
-        
-        return score
-    
-    def _calculate_momentum_score(self, data: pd.DataFrame) -> pd.Series:
-        """Calculate momentum score."""
-        score = pd.Series(0.0, index=data.index)
-        
-        # Price momentum
-        if 'Price_Change_5d' in data.columns:
-            price_momentum = np.tanh(data['Price_Change_5d'] * 20)
-            score += price_momentum * 0.4
-        
-        # Volume momentum
-        if 'Volume_Ratio' in data.columns:
-            volume_momentum = np.tanh((data['Volume_Ratio'] - 1) * 2)
-            score += volume_momentum * 0.3
-        
-        # Trend strength
-        if 'Trend_Strength' in data.columns:
-            trend_score = data['Trend_Strength']
-            score += trend_score * 0.3
-        
-        return score
 
 class StrategyFactory:
     """
@@ -458,8 +321,7 @@ class StrategyFactory:
         strategy_map = {
             'simple_ma': SimpleMAStrategy,
             'mean_reversion': MeanReversionStrategy,
-            'momentum': MomentumStrategy,
-            'multi_factor': MultiFactorStrategy
+            'momentum': MomentumStrategy
         }
         
         if strategy_name not in strategy_map:
@@ -470,7 +332,7 @@ class StrategyFactory:
     @staticmethod
     def get_available_strategies() -> List[str]:
         """Get list of available strategies."""
-        return ['simple_ma', 'mean_reversion', 'momentum', 'multi_factor']
+        return ['simple_ma', 'mean_reversion', 'momentum']
     
     @staticmethod
     def get_strategy_description(strategy_name: str) -> str:
@@ -478,8 +340,7 @@ class StrategyFactory:
         descriptions = {
             'simple_ma': "Simple MA: Basic moving average crossover strategy",
             'mean_reversion': "Mean Reversion: Trades based on price returning to statistical mean",
-            'momentum': "Momentum: Follows trending price movements with multiple confirmations",
-            'multi_factor': "Multi-Factor: Combines technical, sentiment, and momentum factors"
+            'momentum': "Momentum: Follows trending price movements with multiple confirmations"
         }
         
         return descriptions.get(strategy_name, "Unknown strategy")

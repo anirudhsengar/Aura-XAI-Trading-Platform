@@ -3,8 +3,9 @@ import numpy as np
 import ta
 import warnings
 import re
-from utils import DataValidator, LoggingUtils
+from backend.utils import DataValidator
 from textblob import TextBlob
+from pathlib import Path
 
 warnings.filterwarnings('ignore')
 
@@ -13,40 +14,12 @@ class FeatureEngine:
     Feature Engine for calculating technical indicators and sentiment analysis.
     """
     
-    def __init__(self, log_level: str = "INFO"):
+    def __init__(self):
         """
-        Initialize FeatureEngine with logging.
-        
-        Args:
-            log_level: Logging level
+        Initialize FeatureEngine.
         """        
-        # Setup logging
-        self.logger = LoggingUtils.setup_logger(
-            "FeatureEngine", 
-            log_file=str("./logs" / "feature_engine.log"),
-            level=log_level
-        )
-        
         # Initialize sentiment analysis models
         self._initialize_sentiment_models()
-        
-        self.logger.info("FeatureEngine initialized successfully")
-    
-    def _initialize_sentiment_models(self):
-        """
-        Initialize sentiment analysis models.
-        
-        Logic: Uses TextBlob for basic sentiment analysis, removing
-        complex ML dependencies.
-        """
-        try:
-            from textblob import TextBlob
-            self.sentiment_pipeline = None  # No complex ML pipeline
-            self.logger.info("Using TextBlob for sentiment analysis")
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to load TextBlob: {str(e)}")
-            self.sentiment_pipeline = None
     
     def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -60,8 +33,6 @@ class FeatureEngine:
         # Validate input data
         if not DataValidator.validate_ohlcv_data(df):
             raise ValueError("Invalid OHLCV data provided")
-        
-        self.logger.info(f"Calculating technical indicators for data")
         
         # Create a copy to avoid modifying original data
         result_df = df.copy()
@@ -165,204 +136,12 @@ class FeatureEngine:
             (result_df['MACD'].shift(1) >= result_df['MACD_Signal'].shift(1))
         ).astype(int)
         
-        self.logger.info(f"Calculated {len(result_df.columns) - len(df.columns)} technical indicators")
-        
         return result_df
     
-    def calculate_sentiment_features(self, news_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Calculate sentiment features from news data.
-        
-        Args:
-            news_df: DataFrame with news data            
-        Returns:
-            pd.DataFrame: DataFrame with sentiment features by date
-        """
-        if news_df.empty:
-            self.logger.warning("No news data provided for sentiment analysis")
-            return pd.DataFrame()
-        
-        self.logger.info(f"Calculating sentiment features for data")
-        
-        # Create a copy to work with
-        sentiment_df = news_df.copy()
-        
-        # Calculate sentiment scores for headlines
-        sentiment_df['headline_sentiment'] = sentiment_df['headline'].apply(
-            self._analyze_sentiment
-        )
-        
-        # Calculate sentiment scores for summaries if available
-        if 'summary' in sentiment_df.columns:
-            sentiment_df['summary_sentiment'] = sentiment_df['summary'].apply(
-                self._analyze_sentiment
-            )
-        else:
-            sentiment_df['summary_sentiment'] = sentiment_df['headline_sentiment']
-        
-        # Combine headline and summary sentiment
-        sentiment_df['combined_sentiment'] = (
-            sentiment_df['headline_sentiment'] * 0.6 + 
-            sentiment_df['summary_sentiment'] * 0.4
-        )
-        
-        # Add sentiment intensity (absolute value)
-        sentiment_df['sentiment_intensity'] = abs(sentiment_df['combined_sentiment'])
-        
-        # Add sentiment category
-        sentiment_df['sentiment_category'] = sentiment_df['combined_sentiment'].apply(
-            lambda x: 'positive' if x > 0.1 else 'negative' if x < -0.1 else 'neutral'
-        )
-        
-        # Group by date and calculate daily sentiment metrics
-        sentiment_df['date'] = pd.to_datetime(sentiment_df['date']).dt.date
-        
-        daily_sentiment = sentiment_df.groupby('date').agg({
-            'combined_sentiment': ['mean', 'std', 'count'],
-            'sentiment_intensity': ['mean', 'max'],
-            'headline_sentiment': ['mean', 'min', 'max'],
-            'summary_sentiment': ['mean', 'min', 'max']
-        }).reset_index()
-        
-        # Flatten column names
-        daily_sentiment.columns = [
-            'date', 'sentiment_mean', 'sentiment_std', 'news_count',
-            'sentiment_intensity_mean', 'sentiment_intensity_max',
-            'headline_sentiment_mean', 'headline_sentiment_min', 'headline_sentiment_max',
-            'summary_sentiment_mean', 'summary_sentiment_min', 'summary_sentiment_max'
-        ]
-        
-        # Add rolling sentiment features
-        daily_sentiment['sentiment_mean_3d'] = daily_sentiment['sentiment_mean'].rolling(window=3).mean()
-        daily_sentiment['sentiment_mean_7d'] = daily_sentiment['sentiment_mean'].rolling(window=7).mean()
-        
-        # Sentiment momentum (change in sentiment)
-        daily_sentiment['sentiment_momentum'] = daily_sentiment['sentiment_mean'].diff()
-        
-        # Sentiment volatility
-        daily_sentiment['sentiment_volatility'] = daily_sentiment['sentiment_mean'].rolling(window=5).std()
-        
-        # News volume features
-        daily_sentiment['news_volume_change'] = daily_sentiment['news_count'].pct_change()
-        
-        # Set date as index
-        daily_sentiment['date'] = pd.to_datetime(daily_sentiment['date'])
-        daily_sentiment.set_index('date', inplace=True)
-        
-        self.logger.info(f"Calculated sentiment features for {len(daily_sentiment)} days")
-        
-        return daily_sentiment
-    
-    def combine_features(self, market_data: pd.DataFrame, sentiment_data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Combine market data with sentiment features.
-        
-        Args:
-            market_data: DataFrame with market data and technical indicators
-            sentiment_data: DataFrame with sentiment features
-            
-        Returns:
-            pd.DataFrame: Combined feature set
-        """
-        self.logger.info("Combining market data with sentiment features")
-        
-        # Ensure both dataframes have datetime index
-        if not isinstance(market_data.index, pd.DatetimeIndex):
-            market_data.index = pd.to_datetime(market_data.index)
-        
-        if not isinstance(sentiment_data.index, pd.DatetimeIndex):
-            sentiment_data.index = pd.to_datetime(sentiment_data.index)
-        
-        # Remove timezone information to avoid tz-aware/tz-naive conflicts
-        if market_data.index.tz is not None:
-            market_data.index = market_data.index.tz_localize(None)
-        
-        if sentiment_data.index.tz is not None:
-            sentiment_data.index = sentiment_data.index.tz_localize(None)
-        
-        # Merge on date index
-        combined_df = market_data.join(sentiment_data, how='left')
-        
-        # Forward fill sentiment data for missing dates
-        sentiment_columns = sentiment_data.columns
-        combined_df[sentiment_columns] = combined_df[sentiment_columns].fillna(method='ffill')
-        
-        # Fill any remaining NaN values with neutral sentiment
-        combined_df[sentiment_columns] = combined_df[sentiment_columns].fillna(0)
-        
-        # Create interaction features
-        if 'sentiment_mean' in combined_df.columns:
-            # Sentiment-adjusted RSI
-            combined_df['RSI_Sentiment_Adjusted'] = (
-                combined_df['RSI'] + combined_df['sentiment_mean'] * 10
-            )
-            
-            # Sentiment-Volume interaction
-            if 'Volume_Ratio' in combined_df.columns:
-                combined_df['Sentiment_Volume_Interaction'] = (
-                    combined_df['sentiment_mean'] * combined_df['Volume_Ratio']
-                )
-            
-            # Sentiment-Momentum interaction
-            if 'Price_Change' in combined_df.columns:
-                combined_df['Sentiment_Momentum_Interaction'] = (
-                    combined_df['sentiment_mean'] * combined_df['Price_Change']
-                )
-        
-        self.logger.info(f"Combined features dataset has {len(combined_df.columns)} features")
-        
-        return combined_df
-    
-    def _analyze_sentiment(self, text: str) -> float:
-        """
-        Analyze sentiment of a text string using TextBlob only.
-        
-        Args:
-            text: Text to analyze
-            
-        Returns:
-            float: Sentiment score between -1 and 1
-        """
-        if not text or pd.isna(text):
-            return 0.0
-        
-        # Clean text
-        text = self._clean_text(text)
-        
-        if not text:
-            return 0.0
-        
-        try:
-            blob = TextBlob(text)
-            return blob.sentiment.polarity
-                
-        except Exception as e:
-            self.logger.warning(f"Error analyzing sentiment: {str(e)}")
-            return 0.0
-    
-    def _clean_text(self, text: str) -> str:
-        """
-        Clean text for sentiment analysis.
-        
-        Args:
-            text: Raw text
-            
-        Returns:
-            str: Cleaned text
-        """
-        if not text:
-            return ""
-        
-        # Remove URLs
-        text = re.sub(r'http\S+', '', text)
-        
-        # Remove special characters but keep basic punctuation
-        text = re.sub(r'[^a-zA-Z0-9\s.,!?-]', '', text)
-        
-        # Remove extra whitespace
-        text = ' '.join(text.split())
-        
-        return text.strip()
+    def _initialize_sentiment_models(self):
+        """Initialize sentiment analysis models."""
+        # Placeholder for sentiment model initialization
+        pass
     
     def _calculate_trend_strength(self, df: pd.DataFrame) -> pd.Series:
         """

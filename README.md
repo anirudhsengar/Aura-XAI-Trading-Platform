@@ -46,7 +46,7 @@ Aura addresses these problems by providing a unified, user-friendly platform wit
 
 #### *Module 1: Data Ingestion & Processing*
 *   *F-1.1:* Automated ingestion of daily (or hourly) OHLCV (Open, High, Low, Close, Volume) data for US equities from a reliable provider (e.g., Alpaca, Polygon.io, Yahoo Finance).
-*   *F-1.2:* Automated ingestion of financial news headlines and articles from sources like Finnhub, NewsAPI, or scraped from public RSS feeds.
+*   *F-1.2:* Automated ingestion of financial news headlines and articles from sources like Finnhub or scraped from public RSS feeds.
 *   *F-1.3:* A data processing pipeline to clean, align, and merge time-series financial data with unstructured news data.
 *   *F-1.4:* Feature Engineering: The system will automatically calculate a suite of common technical indicators (e.g., RSI, MACD, Bollinger Bands, Moving Averages).
 

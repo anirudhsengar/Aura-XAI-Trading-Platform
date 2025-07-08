@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import os
 import json
-import logging
 from datetime import datetime
 from typing import List, Dict, Any
 import warnings
@@ -277,67 +276,3 @@ class FileUtils:
             path: Directory path
         """
         os.makedirs(path, exist_ok=True)
-
-class LoggingUtils:
-    """
-    Logging utilities for debugging and monitoring.
-    """
-    
-    @staticmethod
-    def setup_logger(name: str, log_file: str = None, level: str = 'INFO') -> logging.Logger:
-        """
-        Set up logger with consistent formatting.
-        
-        Args:
-            name: Logger name
-            log_file: Optional log file path
-            level: Logging level
-            
-        Returns:
-            logging.Logger: Configured logger
-        """
-        logger = logging.getLogger(name)
-        logger.setLevel(getattr(logging, level.upper()))
-        
-        # Create formatter
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-        
-        # File handler if specified
-        if log_file:
-            FileUtils.ensure_directory_exists(os.path.dirname(log_file))
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-        
-        return logger
-    
-    @staticmethod
-    def log_trade_execution(logger: logging.Logger, trade_info: Dict[str, Any]) -> None:
-        """
-        Log trade execution details.
-        
-        Args:
-            logger: Logger instance
-            trade_info: Trade information dictionary
-        """
-        logger.info(f"Trade executed: {trade_info}")
-    
-    @staticmethod
-    def log_data_fetch(logger: logging.Logger, symbol: str, start_date: str, end_date: str) -> None:
-        """
-        Log data fetch operation.
-        
-        Args:
-            logger: Logger instance
-            symbol: Stock symbol
-            start_date: Start date
-            end_date: End date
-        """
-        logger.info(f"Fetching data for {symbol} from {start_date} to {end_date}")

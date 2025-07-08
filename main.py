@@ -5,7 +5,6 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import warnings
 import numpy as np
-
 from backend.data_manager import DataManager
 from backend.feature_engine import FeatureEngine
 from backend.strategies import StrategyFactory
@@ -16,30 +15,31 @@ from backend.utils import DataValidator
 warnings.filterwarnings('ignore')
 
 def load_data(symbol, start_date, end_date):
-    """Load and cache market data."""
+    """Load market data."""
     try:
+        # Ensure dates are datetime objects
+        if isinstance(start_date, str):
+            start_date = pd.to_datetime(start_date)
+        if isinstance(end_date, str):
+            end_date = pd.to_datetime(end_date)
+        
         dm = DataManager()
         market_data = dm.fetch_market_data(symbol, start_date, end_date)
-        news_data = dm.fetch_news_data(symbol, start_date, end_date)
-        return market_data, news_data, None
+        return market_data, None
     except Exception as e:
-        return None, None, str(e)
+        import traceback
+        error_msg = f"Error loading data: {str(e)}\n{traceback.format_exc()}"
+        return None, error_msg
 
-def process_features(market_data, news_data, symbol):
-    """Process features and cache results."""
+def process_features(market_data, symbol):
+    """Process features"""
     try:
         fe = FeatureEngine()
         
         # Calculate technical indicators
-        technical_data = fe.calculate_technical_indicators(market_data, symbol)
+        technical_data = fe.calculate_technical_indicators(market_data)
         
-        # Calculate sentiment features
-        sentiment_data = fe.calculate_sentiment_features(news_data, symbol) if not news_data.empty else pd.DataFrame()
-        
-        # Combine features
-        combined_data = fe.combine_features(technical_data, sentiment_data)
-        
-        return combined_data, None
+        return technical_data, None
     except Exception as e:
         return None, str(e)
 
@@ -182,8 +182,8 @@ def main():
     # Main content area
     if run_analysis:
         with st.spinner("Fetching data and running analysis..."):
-            # Load data
-            market_data, news_data, error = load_data(
+            # Load data with proper datetime conversion
+            market_data, error = load_data(
                 symbol, 
                 datetime.combine(start_date, datetime.min.time()), 
                 datetime.combine(end_date, datetime.min.time())
@@ -193,12 +193,8 @@ def main():
                 st.error(f"Error loading data: {error}")
                 return
             
-            if market_data is None or market_data.empty:
-                st.error("No market data available for the selected period")
-                return
-            
             # Process features
-            processed_data, error = process_features(market_data, news_data, symbol)
+            processed_data, error = process_features(market_data, symbol)
             
             if error:
                 st.error(f"Error processing features: {error}")
@@ -552,7 +548,6 @@ def get_feature_description(feature):
         'BB_Position': 'Bollinger Bands Position - price position within bands',
         'Volume_Ratio': 'Volume Ratio - current volume vs. average volume',
         'Price_Change': 'Price Change - recent price movement',
-        'sentiment_mean': 'News Sentiment - average sentiment from news analysis',
         'SMA_10': '10-day Simple Moving Average',
         'SMA_50': '50-day Simple Moving Average',
         'Volatility_20': '20-day Price Volatility',

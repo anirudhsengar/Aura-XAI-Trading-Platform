@@ -8,12 +8,6 @@ load_dotenv()
 class Config:
     """
     Centralized configuration for the Aura platform.
-    
-    Logic: Stores all configuration parameters in one place for easy
-    management and modification across the application.
-    
-    Why chosen: Centralized configuration makes it easy to modify
-    settings without changing code throughout the application.
     """
     
     # Application Settings
@@ -25,7 +19,6 @@ class Config:
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / "data"
     BACKEND_DIR = BASE_DIR / "backend"
-    LOGS_DIR = BASE_DIR / "logs"
     MODELS_DIR = BASE_DIR / "models"
     
     # Data directories
@@ -36,7 +29,6 @@ class Config:
     RESULTS_DIR = DATA_DIR / "results"
     
     # API Keys
-    NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
     FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
     ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY", "")
     
@@ -70,12 +62,6 @@ class Config:
     # Sentiment Analysis
     SENTIMENT_MODEL_NAME = os.getenv("SENTIMENT_MODEL_NAME", "ProsusAI/finbert")
     SENTIMENT_BATCH_SIZE = int(os.getenv("SENTIMENT_BATCH_SIZE", "16"))
-    
-    # Logging
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-    LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    LOG_FILE_MAX_SIZE = int(os.getenv("LOG_FILE_MAX_SIZE", "10485760"))  # 10MB
-    LOG_FILE_BACKUP_COUNT = int(os.getenv("LOG_FILE_BACKUP_COUNT", "5"))
     
     # Streamlit Settings
     STREAMLIT_THEME = "light"
@@ -125,7 +111,6 @@ class Config:
         """Ensure all necessary directories exist."""
         directories = [
             cls.DATA_DIR,
-            cls.LOGS_DIR,
             cls.MODELS_DIR,
             cls.MARKET_DATA_DIR,
             cls.NEWS_DATA_DIR,
@@ -141,9 +126,6 @@ class Config:
     def validate_api_keys(cls):
         """Validate that required API keys are present."""
         missing_keys = []
-        
-        if not cls.NEWS_API_KEY:
-            missing_keys.append("NEWS_API_KEY")
         
         if not cls.FINNHUB_API_KEY:
             missing_keys.append("FINNHUB_API_KEY")
@@ -164,12 +146,8 @@ class Config:
             "features": cls.FEATURES_DIR,
             "cache": cls.CACHE_DIR,
             "results": cls.RESULTS_DIR,
-            "models": cls.MODELS_DIR,
-            "logs": cls.LOGS_DIR
+            "models": cls.MODELS_DIR
         }
         
         base_path = path_map.get(data_type, cls.DATA_DIR)
         return base_path / filename if filename else base_path
-
-# Initialize directories when module is imported
-Config.ensure_directories()

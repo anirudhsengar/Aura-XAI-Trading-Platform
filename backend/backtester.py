@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime
+from typing import Dict, Any
 import warnings
-from utils import DataValidator, LoggingUtils, MathUtils
-from strategies import BaseStrategy
+from backend.utils import DataValidator, MathUtils
+from backend.strategies import BaseStrategy
 
 warnings.filterwarnings('ignore')
 
@@ -16,7 +16,7 @@ class BacktestEngine:
     def __init__(self, initial_capital: float = 100000, 
                  commission_rate: float = 0.001,
                  slippage_rate: float = 0.0005, # 0.05% difference is acceptable
-                 log_level: str = "INFO"):
+                 ):
         """
         Initialize backtesting engine.
         
@@ -24,23 +24,14 @@ class BacktestEngine:
             initial_capital: Starting portfolio value
             commission_rate: Commission rate (0.001 = 0.1%)
             slippage_rate: Slippage rate (0.0005 = 0.05%)
-            log_level: Logging level
         """
         self.initial_capital = initial_capital
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
         
-        # Setup logging
-        self.logger = LoggingUtils.setup_logger(
-            "BacktestEngine",
-            level=log_level
-        )
-        
         # Reset portfolio state
         self.reset_portfolio()
-        
-        self.logger.info(f"BacktestEngine initialized with ${initial_capital:,.2f} capital")
-    
+            
     def reset_portfolio(self):
         """Reset portfolio to initial state."""
         self.cash = self.initial_capital
@@ -71,9 +62,7 @@ class BacktestEngine:
             
         Returns:
             Dict: Comprehensive backtest results
-        """
-        self.logger.info(f"Starting backtest for {strategy.name} on {symbol}")
-        
+        """        
         # Validate data
         if not DataValidator.validate_ohlcv_data(data):
             raise ValueError("Invalid market data provided")
@@ -98,25 +87,12 @@ class BacktestEngine:
         results['end_date'] = data.index[-1]
         results['total_days'] = len(data)
         
-        self.logger.info(f"Backtest completed for {strategy.name} on {symbol}")
-        self.logger.info(f"Total return: {results['total_return']:.2%}")
-        self.logger.info(f"Sharpe ratio: {results['sharpe_ratio']:.2f}")
-        self.logger.info(f"Max drawdown: {results['max_drawdown']:.2%}")
-        
         return results
     
     def _execute_backtest(self, strategy: BaseStrategy, data: pd.DataFrame, 
                          signals: pd.Series, symbol: str):
         """Execute the backtest day by day."""
-        
-        self.logger.info(f"Starting backtest execution")
-        self.logger.info(f"Data length: {len(data)}, Signals length: {len(signals)}")
-        
-        # Count non-zero signals
-        buy_signals = (signals == 1).sum()
-        sell_signals = (signals == -1).sum()
-        self.logger.info(f"Total signals: {buy_signals} buys, {sell_signals} sells")
-        
+
         executed_trades = 0
         
         for i, (date, row) in enumerate(data.iterrows()):
@@ -129,20 +105,15 @@ class BacktestEngine:
             # Skip if no signal
             if signal == 0:
                 continue
-                
-            self.logger.info(f"Processing signal {"Buy" if signal > 0 else "Sell" if signal < 0 else "Hold"} on {date}")
-            
+                            
             # Execute trade
             if signal != 0:
-                self.logger.info(f"Executing trade: {"Buy" if signal > 0 else "Sell" if signal < 0 else "Hold"}")
                 self._execute_trade(signal, row, date, symbol, strategy)
                 executed_trades += 1
             
             # Update portfolio value
             self._update_portfolio_value(row, date, symbol)
         
-        self.logger.info(f"Execution complete. Trades executed: {executed_trades}")
-
     def _execute_trade(self, signal: int, market_data: pd.Series, 
                       date: datetime, symbol: str, strategy: BaseStrategy):
         """Execute a single trade"""
@@ -169,12 +140,6 @@ class BacktestEngine:
                     
                     # Record trade
                     self._record_trade(date, symbol, 'BUY', shares_to_buy, price, 0, 0)
-                    
-                    self.logger.info(f"BUY: {shares_to_buy} shares at ${price:.2f}")
-                else:
-                    self.logger.warning(f"No shares calculated for purchase")
-            else:
-                self.logger.info(f"Already holding position, skipping Buy")
                 
         elif signal < 0:  # Sell signal
             # Only sell if we have a position
@@ -188,10 +153,6 @@ class BacktestEngine:
                 
                 # Record trade
                 self._record_trade(date, symbol, 'SELL', shares_to_sell, price, 0, 0)
-                
-                self.logger.info(f"SELL: {shares_to_sell} shares at ${price:.2f}")
-            else:
-                self.logger.info(f"No position to sell")
 
     def _record_trade(self, date: datetime, symbol: str, action: str, 
                      shares: int, price: float, commission: float, slippage: float):
@@ -227,9 +188,7 @@ class BacktestEngine:
                     else:
                         self.losing_trades += 1
                     break
-        
-        self.logger.info(f"Trade executed: {action} {shares} shares of {symbol} at ${price:.2f}")
-    
+            
     def _update_portfolio_value(self, market_data: pd.Series, date: datetime, symbol: str):
         """Update portfolio value and equity curve."""
         
@@ -273,10 +232,6 @@ class BacktestEngine:
         total_return = (self.portfolio_value - self.initial_capital) / self.initial_capital
         annualized_return = (self.portfolio_value / self.initial_capital) ** (252 / len(data)) - 1
 
-        # Flag to check if the strategy is working or not
-        if self.total_trades == 0:
-            self.logger.warning(f"No trades executed so the strategy needs adjustment")
-        
         # Risk metrics
         returns_series = pd.Series(self.daily_returns)
         volatility = MathUtils.calculate_volatility(returns_series, True) if len(returns_series) > 1 else 0
