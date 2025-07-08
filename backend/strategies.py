@@ -2,22 +2,15 @@ import pandas as pd
 import numpy as np
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Any
 import warnings
-warnings.filterwarnings('ignore')
+from utils import LoggingUtils
 
-# Import utilities
-from utils import DateUtils, DataValidator, FileUtils, LoggingUtils, MathUtils
+warnings.filterwarnings('ignore')
 
 class BaseStrategy(ABC):
     """
     Base class for all trading strategies.
-    
-    Logic: Provides common functionality for all strategies including
-    signal generation, risk management, and performance tracking.
-    
-    Why chosen: Ensures consistent interface across all strategies,
-    implements common risk management, and provides extensibility.
     """
     
     def __init__(self, name: str, params: Dict[str, Any] = None):
@@ -62,9 +55,6 @@ class BaseStrategy(ABC):
         """
         Calculate position size based on risk management rules.
         
-        Logic: Uses volatility-based position sizing and Kelly criterion
-        for optimal position sizing.
-        
         Args:
             data: Market data
             signal: Trading signal
@@ -75,12 +65,12 @@ class BaseStrategy(ABC):
         if signal == 0:
             return 0
         
-        # Calculate volatility-based position size
+        # Calculate monthly volatility based position size
         if 'Volatility_20' in data.columns:
             volatility = data['Volatility_20'].iloc[-1]
             if volatility > 0:
                 # Inverse volatility scaling
-                vol_adjusted_size = self.max_position_size * (0.02 / volatility)
+                vol_adjusted_size = self.max_position_size * (0.02 / volatility) # 2% daily target volatility
                 return min(vol_adjusted_size, self.max_position_size)
         
         return self.max_position_size
@@ -89,9 +79,6 @@ class BaseStrategy(ABC):
         """
         Apply risk management rules to trading signals.
         
-        Logic: Implements stop-loss, take-profit, and position limits
-        to manage risk.
-        
         Args:
             data: Market data
             signal: Original signal
@@ -99,15 +86,7 @@ class BaseStrategy(ABC):
         Returns:
             int: Risk-adjusted signal
         """
-        # Add logging for debugging
-        if hasattr(self, 'logger'):
-            self.logger.info(f"Risk management: input signal={signal}, current_position={self.current_position}")
         
-        # Temporarily disable risk management for debugging
-        return signal
-        
-        # Original risk management code (commented out for debugging)
-        """
         current_price = data['Close'].iloc[-1]
         
         # If we have a position, check for exit conditions
@@ -139,7 +118,6 @@ class BaseStrategy(ABC):
                     return 1  # Exit short position
         
         return signal
-        """
 
     def update_position(self, signal: int, price: float, timestamp: datetime):
         """
@@ -167,16 +145,63 @@ class BaseStrategy(ABC):
             self.current_position = signal
             self.entry_price = price
 
+class SimpleMAStrategy(BaseStrategy):
+    """
+    Simple Moving Average Crossover Strategy.
+    """
+    
+    def __init__(self, params: Dict[str, Any] = None):
+        default_params = {
+            'fast_ma': 10,
+            'slow_ma': 20
+        }
+        
+        if params:
+            default_params.update(params)
+        
+        super().__init__("SimpleMA", default_params)
+    
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        """
+        Generate simple MA crossover signals.
+        
+        Logic: Buy when fast MA > slow MA, sell when fast MA < slow MA.
+        """
+        signals = pd.Series(0, index=data.index)
+        
+        # Check for required columns
+        if 'SMA_10' not in data.columns or 'SMA_20' not in data.columns:
+            self.logger.warning(f"Missing MA columns. Available: {data.columns.tolist()}")
+            return signals
+        
+        # Simple crossover logic
+        fast_ma = data['SMA_10']
+        slow_ma = data['SMA_20']
+        
+        # Buy when fast MA is above slow MA
+        buy_condition = fast_ma > slow_ma
+        
+        # Sell when fast MA is below slow MA
+        sell_condition = fast_ma < slow_ma
+        
+        # Generate signals
+        signals[buy_condition] = 1
+        signals[sell_condition] = -1
+        
+        # Only trade on crossovers (when signal changes)
+        signals = signals.diff().fillna(0)
+        signals = signals.replace({2: 1, -2: -1})  # Clean up diff artifacts
+        
+        buy_signals = (signals == 1).sum()
+        sell_signals = (signals == -1).sum()
+        
+        self.logger.info(f"Simple MA Strategy generated {buy_signals} buy signals and {sell_signals} sell signals")
+        
+        return signals
+
 class MeanReversionStrategy(BaseStrategy):
     """
     Mean Reversion Strategy using Bollinger Bands and RSI.
-    
-    Logic: Assumes prices revert to their mean over time. Buys when
-    price is oversold and below lower Bollinger Band, sells when
-    price is overbought and above upper Bollinger Band.
-    
-    Why chosen: Statistically robust, works well in ranging markets,
-    and has strong theoretical foundation in financial mathematics.
     """
     
     def __init__(self, params: Dict[str, Any] = None):
@@ -197,9 +222,6 @@ class MeanReversionStrategy(BaseStrategy):
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
         """
         Generate mean reversion signals.
-        
-        Logic: Combines Bollinger Bands, RSI, and volume analysis
-        for high-probability mean reversion trades.
         """
         signals = pd.Series(0, index=data.index)
         
@@ -241,13 +263,6 @@ class MeanReversionStrategy(BaseStrategy):
 class MomentumStrategy(BaseStrategy):
     """
     Momentum Strategy using multiple timeframes and trend confirmation.
-    
-    Logic: Follows the trend by buying when multiple indicators confirm
-    upward momentum and selling when they confirm downward momentum.
-    
-    Why chosen: Momentum strategies have shown consistent performance
-    across different markets and timeframes. Multiple confirmations
-    reduce false signals.
     """
     
     def __init__(self, params: Dict[str, Any] = None):
@@ -268,9 +283,6 @@ class MomentumStrategy(BaseStrategy):
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
         """
         Generate momentum signals with multiple confirmations.
-        
-        Logic: Requires alignment of multiple indicators for signal
-        generation to increase probability of success.
         """
         signals = pd.Series(0, index=data.index)
         
@@ -321,14 +333,6 @@ class MomentumStrategy(BaseStrategy):
 class MultiFactorStrategy(BaseStrategy):
     """
     Multi-Factor Strategy combining technical indicators with sentiment.
-    
-    Logic: Integrates multiple sources of information including technical
-    analysis, sentiment analysis, and market microstructure for robust
-    signal generation.
-    
-    Why chosen: Diversified approach reduces strategy-specific risks,
-    incorporates alternative data (sentiment), and adapts to different
-    market conditions.
     """
     
     def __init__(self, params: Dict[str, Any] = None):
@@ -443,65 +447,6 @@ class MultiFactorStrategy(BaseStrategy):
         
         return score
 
-class SimpleMAStrategy(BaseStrategy):
-    """
-    Simple Moving Average Crossover Strategy.
-    
-    Logic: Buy when fast MA crosses above slow MA, sell when it crosses below.
-    This is the simplest trend-following strategy.
-    
-    Why chosen: Extremely simple, easy to debug, widely understood.
-    """
-    
-    def __init__(self, params: Dict[str, Any] = None):
-        default_params = {
-            'fast_ma': 10,
-            'slow_ma': 20
-        }
-        
-        if params:
-            default_params.update(params)
-        
-        super().__init__("SimpleMA", default_params)
-    
-    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
-        """
-        Generate simple MA crossover signals.
-        
-        Logic: Buy when fast MA > slow MA, sell when fast MA < slow MA.
-        """
-        signals = pd.Series(0, index=data.index)
-        
-        # Check for required columns
-        if 'SMA_10' not in data.columns or 'SMA_20' not in data.columns:
-            self.logger.warning(f"Missing MA columns. Available: {data.columns.tolist()}")
-            return signals
-        
-        # Simple crossover logic
-        fast_ma = data['SMA_10']
-        slow_ma = data['SMA_20']
-        
-        # Buy when fast MA is above slow MA
-        buy_condition = fast_ma > slow_ma
-        
-        # Sell when fast MA is below slow MA
-        sell_condition = fast_ma < slow_ma
-        
-        # Generate signals
-        signals[buy_condition] = 1
-        signals[sell_condition] = -1
-        
-        # Only trade on crossovers (when signal changes)
-        signals = signals.diff().fillna(0)
-        signals = signals.replace({2: 1, -2: -1})  # Clean up diff artifacts
-        
-        buy_signals = (signals == 1).sum()
-        sell_signals = (signals == -1).sum()
-        
-        self.logger.info(f"Simple MA Strategy generated {buy_signals} buy signals and {sell_signals} sell signals")
-        
-        return signals
-
 class StrategyFactory:
     """
     Factory class for creating trading strategies.
@@ -538,55 +483,3 @@ class StrategyFactory:
         }
         
         return descriptions.get(strategy_name, "Unknown strategy")
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Test strategy creation
-    print("Testing Strategy Factory...")
-    
-    # Create different strategies
-    strategies = []
-    for strategy_name in StrategyFactory.get_available_strategies():
-        try:
-            strategy = StrategyFactory.create_strategy(strategy_name)
-            strategies.append(strategy)
-            print(f"Created {strategy_name}: {StrategyFactory.get_strategy_description(strategy_name)}")
-        except Exception as e:
-            print(f"Error creating {strategy_name}: {str(e)}")
-    
-    # Test with sample data
-    print("\nTesting signal generation...")
-    
-    # Create sample data
-    dates = pd.date_range(start='2024-01-01', periods=100, freq='D')
-    sample_data = pd.DataFrame({
-        'Close': np.random.randn(100).cumsum() + 100,
-        'RSI': np.random.uniform(20, 80, 100),
-        'BB_High': np.random.randn(100).cumsum() + 105,
-        'BB_Low': np.random.randn(100).cumsum() + 95,
-        'BB_Position': np.random.uniform(0, 1, 100),
-        'MACD': np.random.randn(100),
-        'MACD_Signal': np.random.randn(100),
-        'Volume_Ratio': np.random.uniform(0.5, 2.0, 100),
-        'SMA_10': np.random.randn(100).cumsum() + 99,
-        'SMA_50': np.random.randn(100).cumsum() + 98,
-        'Price_Change': np.random.randn(100) * 0.02,
-        'Price_Change_5d': np.random.randn(100) * 0.05,
-        'Volatility_20': np.random.uniform(0.1, 0.3, 100),
-        'sentiment_mean': np.random.uniform(-0.5, 0.5, 100),
-        'sentiment_momentum': np.random.randn(100) * 0.1,
-        'Trend_Strength': np.random.uniform(-1, 1, 100),
-        'news_count': np.random.randint(1, 10, 100)
-    }, index=dates)
-    
-    # Test signal generation for each strategy
-    for strategy in strategies:
-        try:
-            signals = strategy.generate_signals(sample_data)
-            buy_signals = (signals == 1).sum()
-            sell_signals = (signals == -1).sum()
-            print(f"{strategy.name}: {buy_signals} buy signals, {sell_signals} sell signals")
-        except Exception as e:
-            print(f"Error testing {strategy.name}: {str(e)}")
-    
-    print("\nStrategy testing completed!")
