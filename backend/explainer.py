@@ -133,8 +133,6 @@ class Explainer:
             explanation.update(self._explain_mean_reversion(trade_row, signal, strategy.params))
         elif strategy.name == 'Momentum':
             explanation.update(self._explain_momentum(trade_row, signal, strategy.params))
-        elif strategy.name == 'MultiFactor':
-            explanation.update(self._explain_multi_factor(trade_row, signal, strategy.params))
         
         return explanation
     
@@ -197,27 +195,29 @@ class Explainer:
             'feature_analysis': {},
             'decision_rationale': []
         }
+
+        fast_ma_period = params.get('fast_ma', 10)
+        slow_ma_period = params.get('slow_ma', 50)
+        fast_ma_col = f'SMA_{fast_ma_period}'
+        slow_ma_col = f'SMA_{slow_ma_period}'
         
         # Analyze Moving Averages
-        if 'SMA_10' in trade_row.index and 'SMA_50' in trade_row.index:
-            sma_10 = trade_row['SMA_10']
-            sma_50 = trade_row['SMA_50']
+        if fast_ma_col in trade_row.index and slow_ma_col in trade_row.index:
+            fast_ma = trade_row[fast_ma_col]
+            slow_ma = trade_row[slow_ma_col]
             price = trade_row['Close']
             
             explanation['feature_analysis']['moving_averages'] = {
-                'price_vs_sma10': 'Above' if price > sma_10 else 'Below',
-                'price_vs_sma50': 'Above' if price > sma_50 else 'Below',
-                'sma10_vs_sma50': 'Above' if sma_10 > sma_50 else 'Below'
+                'price_vs_fast_ma': 'Above' if price > fast_ma else 'Below',
+                'fast_ma_vs_slow_ma': 'Above' if fast_ma > slow_ma else 'Below'
             }
             
-            if signal == 1:
-                if price > sma_10 > sma_50:
-                    explanation['triggered_conditions'].append('Price above both moving averages (bullish alignment)')
-                    explanation['decision_rationale'].append('Strong upward momentum confirmed by MA alignment')
-            elif signal == -1:
-                if price < sma_10 < sma_50:
-                    explanation['triggered_conditions'].append('Price below both moving averages (bearish alignment)')
-                    explanation['decision_rationale'].append('Strong downward momentum confirmed by MA alignment')
+            if signal == 1 and price > fast_ma and fast_ma > slow_ma:
+                explanation['triggered_conditions'].append('Price above fast MA and fast MA above slow MA (bullish alignment)')
+                explanation['decision_rationale'].append('Strong upward momentum confirmed by MA alignment')
+            elif signal == -1 and price < fast_ma and fast_ma < slow_ma:
+                explanation['triggered_conditions'].append('Price below fast MA and fast MA below slow MA (bearish alignment)')
+                explanation['decision_rationale'].append('Strong downward momentum confirmed by MA alignment')
         
         # Analyze MACD
         if 'MACD' in trade_row.index and 'MACD_Signal' in trade_row.index:
@@ -237,6 +237,28 @@ class Explainer:
                 explanation['triggered_conditions'].append('MACD below signal line (bearish)')
                 explanation['decision_rationale'].append('MACD confirms downward momentum')
         
+        # Analyze RSI
+        if 'RSI' in trade_row.index:
+            rsi = trade_row['RSI']
+            rsi_threshold = params.get('rsi_momentum_threshold', 50)
+            explanation['feature_analysis']['rsi'] = {
+                'value': rsi,
+                'threshold': rsi_threshold,
+                'interpretation': 'Bullish' if rsi > rsi_threshold else 'Bearish'
+            }
+            if signal == 1 and rsi > rsi_threshold:
+                explanation['triggered_conditions'].append(f'RSI above {rsi_threshold} (bullish momentum)')
+            elif signal == -1 and rsi < rsi_threshold:
+                explanation['triggered_conditions'].append(f'RSI below {rsi_threshold} (bearish momentum)')
+
+        # Analyze Momentum Strength
+        if 'Price_Change_5d' in trade_row.index:
+            strength = trade_row['Price_Change_5d']
+            strength_threshold = params.get('min_momentum_strength', 0.02)
+            if abs(strength) > strength_threshold:
+                explanation['triggered_conditions'].append(f'5-day price change ({strength:.2%}) exceeds threshold ({strength_threshold:.2%})')
+                explanation['decision_rationale'].append('Sufficient momentum strength confirmed')
+
         return explanation
     
     def _explain_multi_factor(self, trade_row: pd.Series, signal: int, params: Dict) -> Dict[str, Any]:
@@ -255,21 +277,13 @@ class Explainer:
             technical_score += rsi_score * 0.3
             explanation['factor_scores']['rsi_contribution'] = rsi_score * 0.3
         
-        # Sentiment factor analysis
-        sentiment_score = 0
-        if 'sentiment_mean' in trade_row.index:
-            sentiment_score = trade_row['sentiment_mean']
-            explanation['factor_scores']['sentiment_contribution'] = sentiment_score * params.get('sentiment_weight', 0.3)
-        
         # Combine factor explanations
         explanation['feature_analysis']['multi_factor'] = {
-            'technical_score': technical_score,
-            'sentiment_score': sentiment_score,
-            'combined_signal_strength': abs(technical_score) + abs(sentiment_score)
+            'technical_score': technical_score
         }
         
         if signal != 0:
-            explanation['decision_rationale'].append(f'Multi-factor model combines technical and sentiment signals')
+            explanation['decision_rationale'].append(f'Multi-factor model combines technical')
             explanation['triggered_conditions'].append(f'Composite score exceeded threshold')
         
         return explanation
@@ -323,7 +337,7 @@ class Explainer:
         # Select relevant features
         feature_columns = [
             'RSI', 'MACD', 'BB_Position', 'Volume_Ratio', 'Price_Change',
-            'sentiment_mean', 'SMA_10', 'SMA_50', 'Volatility_20'
+            'SMA_10', 'SMA_50', 'Volatility_20'
         ]
         
         available_features = [col for col in feature_columns if col in data.columns]
@@ -454,12 +468,6 @@ class Explainer:
                 risk_factors.append("Extremely overbought conditions")
             elif trade_row['RSI'] < 20:
                 risk_factors.append("Extremely oversold conditions")
-        
-        # Sentiment risk
-        if 'sentiment_mean' in trade_row.index:
-            sentiment = trade_row['sentiment_mean']
-            if abs(sentiment) > 0.5:
-                risk_factors.append("Extreme sentiment may indicate market overreaction")
         
         return risk_factors
     

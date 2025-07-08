@@ -159,13 +159,21 @@ class SimpleMAStrategy(BaseStrategy):
         """
         signals = pd.Series(0, index=data.index)
         
+        fast_ma_period = self.params.get('fast_ma', 10)
+        slow_ma_period = self.params.get('slow_ma', 20)
+        
+        fast_ma_col = f'SMA_{fast_ma_period}'
+        slow_ma_col = f'SMA_{slow_ma_period}'
+
         # Check for required columns
-        if 'SMA_10' not in data.columns or 'SMA_20' not in data.columns:
+        if fast_ma_col not in data.columns or slow_ma_col not in data.columns:
+            # Note: This will fail if the user selects a period not calculated by FeatureEngine.
+            # A more advanced solution would involve dynamically calculating features.
             return signals
         
         # Simple crossover logic
-        fast_ma = data['SMA_10']
-        slow_ma = data['SMA_20']
+        fast_ma = data[fast_ma_col]
+        slow_ma = data[slow_ma_col]
         
         # Buy when fast MA is above slow MA
         buy_condition = fast_ma > slow_ma
@@ -217,14 +225,14 @@ class MeanReversionStrategy(BaseStrategy):
         # More relaxed mean reversion conditions for better signal generation
         oversold_condition = (
             (data['Close'] < data['BB_Low']) &
-            (data['RSI'] < self.params['rsi_oversold'])
-            # Removed volume threshold to be less restrictive
+            (data['RSI'] < self.params['rsi_oversold']) &
+            (data['Volume_Ratio'] > self.params['volume_threshold'])
         )
         
         overbought_condition = (
             (data['Close'] > data['BB_High']) &
-            (data['RSI'] > self.params['rsi_overbought'])
-            # Removed volume threshold to be less restrictive
+            (data['RSI'] > self.params['rsi_overbought']) &
+            (data['Volume_Ratio'] > self.params['volume_threshold'])
         )
         
         # Generate signals
@@ -268,17 +276,23 @@ class MomentumStrategy(BaseStrategy):
         """
         signals = pd.Series(0, index=data.index)
         
+        fast_ma_period = self.params.get('fast_ma', 10)
+        slow_ma_period = self.params.get('slow_ma', 50)
+        
+        fast_ma_col = f'SMA_{fast_ma_period}'
+        slow_ma_col = f'SMA_{slow_ma_period}'
+
         # Ensure we have required columns
-        required_cols = ['Close', 'SMA_10', 'SMA_50', 'RSI', 'MACD', 'MACD_Signal']
+        required_cols = ['Close', fast_ma_col, slow_ma_col, 'RSI', 'MACD', 'MACD_Signal', 'Price_Change_5d']
         if not all(col in data.columns for col in required_cols):
             return signals
         
         # Simplified momentum conditions - less restrictive
-        price_above_fast_ma = data['Close'] > data['SMA_10']
-        fast_ma_above_slow = data['SMA_10'] > data['SMA_50']
+        price_above_fast_ma = data['Close'] > data[fast_ma_col]
+        fast_ma_above_slow = data[fast_ma_col] > data[slow_ma_col]
         
-        price_below_fast_ma = data['Close'] < data['SMA_10']
-        fast_ma_below_slow = data['SMA_10'] < data['SMA_50']
+        price_below_fast_ma = data['Close'] < data[fast_ma_col]
+        fast_ma_below_slow = data[fast_ma_col] < data[slow_ma_col]
         
         # RSI momentum
         rsi_bullish = data['RSI'] > self.params['rsi_momentum_threshold']
@@ -287,13 +301,17 @@ class MomentumStrategy(BaseStrategy):
         # MACD confirmation
         macd_bullish = data['MACD'] > data['MACD_Signal']
         macd_bearish = data['MACD'] < data['MACD_Signal']
+
+        # Momentum strength confirmation
+        momentum_strong_enough = data['Price_Change_5d'].abs() > self.params['min_momentum_strength']
         
         # Simplified bullish momentum conditions (removed some requirements)
         bullish_momentum = (
             price_above_fast_ma &
             fast_ma_above_slow &
             rsi_bullish &
-            macd_bullish
+            macd_bullish &
+            momentum_strong_enough
         )
         
         # Simplified bearish momentum conditions
@@ -301,7 +319,8 @@ class MomentumStrategy(BaseStrategy):
             price_below_fast_ma &
             fast_ma_below_slow &
             rsi_bearish &
-            macd_bearish
+            macd_bearish &
+            momentum_strong_enough
         )
         
         # Generate signals

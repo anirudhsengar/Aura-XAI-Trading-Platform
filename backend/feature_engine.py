@@ -1,11 +1,8 @@
 import pandas as pd
-import numpy as np
 import ta
 import warnings
-import re
 from backend.utils import DataValidator
-from textblob import TextBlob
-from pathlib import Path
+from typing import Dict
 
 warnings.filterwarnings('ignore')
 
@@ -17,16 +14,15 @@ class FeatureEngine:
     def __init__(self):
         """
         Initialize FeatureEngine.
-        """        
-        # Initialize sentiment analysis models
-        self._initialize_sentiment_models()
+        """
     
-    def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_technical_indicators(self, df: pd.DataFrame, strategy_params: Dict = None) -> pd.DataFrame:
         """
         Calculate comprehensive technical indicators for market data.
         
         Args:
-            df: DataFrame with OHLCV data            
+            df: DataFrame with OHLCV data
+            strategy_params: Optional dictionary of strategy parameters for dynamic calculation.       
         Returns:
             pd.DataFrame: DataFrame with technical indicators added
         """
@@ -36,6 +32,9 @@ class FeatureEngine:
         
         # Create a copy to avoid modifying original data
         result_df = df.copy()
+
+        # Get dynamic parameters or use defaults
+        bb_period = strategy_params.get('bb_period', 20) if strategy_params else 20
         
         # 1. TREND INDICATORS
         # Moving Averages
@@ -54,9 +53,9 @@ class FeatureEngine:
         result_df['MACD_Histogram'] = ta.trend.macd_diff(df['Close'])
         
         # Bollinger Bands
-        result_df['BB_High'] = ta.volatility.bollinger_hband(df['Close'])
-        result_df['BB_Low'] = ta.volatility.bollinger_lband(df['Close'])
-        result_df['BB_Middle'] = ta.volatility.bollinger_mavg(df['Close'])
+        result_df['BB_High'] = ta.volatility.bollinger_hband(df['Close'], window=bb_period)
+        result_df['BB_Low'] = ta.volatility.bollinger_lband(df['Close'], window=bb_period)
+        result_df['BB_Middle'] = ta.volatility.bollinger_mavg(df['Close'], window=bb_period)
         result_df['BB_Width'] = result_df['BB_High'] - result_df['BB_Low']
         result_df['BB_Position'] = (df['Close'] - result_df['BB_Low']) / result_df['BB_Width']
         
@@ -137,11 +136,6 @@ class FeatureEngine:
         ).astype(int)
         
         return result_df
-    
-    def _initialize_sentiment_models(self):
-        """Initialize sentiment analysis models."""
-        # Placeholder for sentiment model initialization
-        pass
     
     def _calculate_trend_strength(self, df: pd.DataFrame) -> pd.Series:
         """

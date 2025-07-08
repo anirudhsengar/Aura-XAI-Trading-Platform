@@ -31,13 +31,13 @@ def load_data(symbol, start_date, end_date):
         error_msg = f"Error loading data: {str(e)}\n{traceback.format_exc()}"
         return None, error_msg
 
-def process_features(market_data, symbol):
+def process_features(market_data, symbol, strategy_params=None):
     """Process features"""
     try:
         fe = FeatureEngine()
         
         # Calculate technical indicators
-        technical_data = fe.calculate_technical_indicators(market_data)
+        technical_data = fe.calculate_technical_indicators(market_data, strategy_params)
         
         return technical_data, None
     except Exception as e:
@@ -194,7 +194,7 @@ def main():
                 return
             
             # Process features
-            processed_data, error = process_features(market_data, symbol)
+            processed_data, error = process_features(market_data, symbol, strategy_params)
             
             if error:
                 st.error(f"Error processing features: {error}")
