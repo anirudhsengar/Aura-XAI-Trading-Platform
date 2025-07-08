@@ -128,8 +128,7 @@ def main():
     strategy_options = {
         "Simple MA Crossover": "simple_ma",
         "Mean Reversion": "mean_reversion",
-        "Momentum": "momentum", 
-        "Multi-Factor": "multi_factor"
+        "Momentum": "momentum"
     }
     selected_strategy_name = st.sidebar.selectbox("Choose Strategy", 
                                                   index = 0,
@@ -159,13 +158,6 @@ def main():
             'slow_ma': st.sidebar.slider("Slow MA", 30, 100, 50),
             'rsi_momentum_threshold': st.sidebar.slider("RSI Momentum", 40, 60, 50),
             'min_momentum_strength': st.sidebar.slider("Momentum Strength", 0.01, 0.05, 0.02)
-        }
-    elif selected_strategy == "multi_factor":
-        strategy_params = {
-            'technical_weight': st.sidebar.slider("Technical Weight", 0.1, 0.8, 0.4),
-            'sentiment_weight': st.sidebar.slider("Sentiment Weight", 0.1, 0.8, 0.3),
-            'momentum_weight': st.sidebar.slider("Momentum Weight", 0.1, 0.8, 0.3),
-            'signal_threshold': st.sidebar.slider("Signal Threshold", 0.3, 0.8, 0.5)
         }
     
     # Risk Management
@@ -580,7 +572,6 @@ def display_welcome_screen():
     - **Simple MA Crossover**: Basic moving average crossover strategy - perfect for beginners
     - **Mean Reversion**: Buys oversold assets, sells overbought ones
     - **Momentum**: Follows trending price movements
-    - **Multi-Factor**: Combines technical and sentiment analysis
     
     Ready to start? Configure your analysis in the sidebar and click **Run Analysis**!
     """)
