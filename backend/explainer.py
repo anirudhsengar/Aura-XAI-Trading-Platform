@@ -1,37 +1,18 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Any
 import warnings
-warnings.filterwarnings('ignore')
-
-# SHAP for explainable AI
 import shap
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-
-# Machine Learning
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-
-# Import utilities
-from utils import DateUtils, DataValidator, FileUtils, LoggingUtils
+from utils import LoggingUtils
 from strategies import BaseStrategy
+
+warnings.filterwarnings('ignore')
 
 class Explainer:
     """
     Explainable AI system for trading decision analysis.
-    
-    Logic: This is the core innovation of Aura - providing transparent
-    explanations for why trading decisions were made. Uses SHAP values
-    to decompose predictions and shows feature contributions.
-    
-    Why chosen: Transparency is crucial for trust in AI trading systems.
-    SHAP provides mathematically rigorous explanations that help users
-    understand and validate trading decisions.
     """
     
     def __init__(self, log_level: str = "INFO"):
@@ -61,10 +42,6 @@ class Explainer:
                               context_window: int = 20) -> Dict[str, Any]:
         """
         Explain why a specific trade decision was made.
-        
-        Logic: Analyzes the factors that contributed to a trading signal
-        at a specific point in time, providing both quantitative SHAP
-        values and qualitative explanations.
         
         Args:
             strategy: The trading strategy that generated the signal
@@ -110,9 +87,6 @@ class Explainer:
                             trade_row: pd.Series, signal: int) -> Dict[str, Any]:
         """
         Explain ML-based trading decisions using SHAP.
-        
-        Logic: Uses SHAP values to decompose the model's prediction
-        into individual feature contributions.
         """
         try:
             # Prepare features for SHAP analysis
@@ -161,9 +135,6 @@ class Explainer:
                                    trade_row: pd.Series, signal: int) -> Dict[str, Any]:
         """
         Explain rule-based trading decisions.
-        
-        Logic: Analyzes which rules/conditions triggered the signal
-        and provides explanations based on strategy logic.
         """
         explanation = {
             'explanation_type': 'rule_based',
@@ -541,55 +512,3 @@ class Explainer:
         except Exception as e:
             self.logger.error(f"Error getting trade context: {str(e)}")
             return pd.DataFrame()
-
-# Example usage and testing
-if __name__ == "__main__":
-    from strategies import StrategyFactory
-    
-    print("Testing Explainer...")
-    
-    # Create sample data
-    dates = pd.date_range(start='2024-01-01', periods=50, freq='D')
-    sample_data = pd.DataFrame({
-        'Close': np.random.randn(50).cumsum() + 100,
-        'RSI': np.random.uniform(20, 80, 50),
-        'MACD': np.random.randn(50),
-        'MACD_Signal': np.random.randn(50),
-        'BB_Position': np.random.uniform(0, 1, 50),
-        'Volume_Ratio': np.random.uniform(0.5, 2.0, 50),
-        'Price_Change': np.random.randn(50) * 0.02,
-        'sentiment_mean': np.random.uniform(-0.5, 0.5, 50),
-        'SMA_10': np.random.randn(50).cumsum() + 99,
-        'SMA_50': np.random.randn(50).cumsum() + 98,
-        'Volatility_20': np.random.uniform(0.01, 0.05, 50)
-    }, index=dates)
-    
-    try:
-        # Initialize explainer
-        explainer = Explainer()
-        
-        # Test with mean reversion strategy
-        strategy = StrategyFactory.create_strategy('mean_reversion')
-        
-        # Test explanation for a trade
-        trade_date = dates[25]
-        explanation = explainer.explain_trade_decision(
-            strategy, sample_data, trade_date, signal=1
-        )
-        
-        print(f"Explanation generated for {trade_date}")
-        print(f"Signal: {explanation.get('signal_description', 'Unknown')}")
-        print(f"Strategy: {explanation.get('strategy_name', 'Unknown')}")
-        
-        if 'triggered_conditions' in explanation:
-            print(f"Triggered conditions: {len(explanation['triggered_conditions'])}")
-        
-        if 'feature_importance' in explanation:
-            print(f"Feature importance calculated: {len(explanation['feature_importance'])} features")
-        
-        print("Explainer testing completed successfully!")
-        
-    except Exception as e:
-        print(f"Error during testing: {str(e)}")
-        import traceback
-        traceback.print_exc()
