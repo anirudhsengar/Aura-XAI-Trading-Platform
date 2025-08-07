@@ -6,15 +6,6 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-class DataValidator:
-    """Data validation utilities."""
-    
-    @staticmethod
-    def validate_ohlcv_data(data: pd.DataFrame) -> bool:
-        """Validate OHLCV data format."""
-        required_cols = ['Close']
-        return all(col in data.columns for col in required_cols) and len(data) > 0
-
 class MathUtils:
     """Mathematical utilities for performance calculations."""
     
