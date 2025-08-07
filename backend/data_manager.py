@@ -1,140 +1,165 @@
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
-import os
+from typing import Optional, Dict, Any
+import warnings
+
+warnings.filterwarnings('ignore')
 
 class DataManager:
     """
-    Data Manager for fetching and managing financial.
+    Data management class for fetching and processing market data.
     """
     
     def __init__(self):
+        """Initialize DataManager."""
+        self.cache = {}
+        
+    def fetch_market_data(self, symbol: str, start_date: datetime, 
+                         end_date: datetime) -> pd.DataFrame:
         """
-        Initialize DataManager.
-        """
-        # API configurations
-        self.finnhub_api_key = os.getenv("FINNHUB_API_KEY", "")
-    
-    def fetch_market_data(self, symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        """
-        Fetch OHLCV market data for a given symbol and date range.
+        Fetch market data from Yahoo Finance.
         
         Args:
-            symbol: Stock ticker symbol
+            symbol: Stock symbol (e.g., 'AAPL')
             start_date: Start date for data
             end_date: End date for data
             
         Returns:
-            pd.DataFrame: OHLCV data with DatetimeIndex
+            pd.DataFrame: Market data with OHLCV columns
         """
         try:
-            # Fetch data from Yahoo Finance
+            # Create cache key
+            cache_key = f"{symbol}_{start_date}_{end_date}"
+            
+            # Check cache first
+            if cache_key in self.cache:
+                return self.cache[cache_key].copy()
+            
+            # Fetch data from yfinance
             ticker = yf.Ticker(symbol)
-            data = ticker.history(
-                start=start_date,
-                end=end_date,
-                interval='1d'
-            )
+            data = ticker.history(start=start_date, end=end_date)
             
             if data.empty:
                 raise ValueError(f"No data found for symbol {symbol}")
             
-            # Ensure all numeric columns are properly typed
-            numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-            for col in numeric_columns:
-                if col in data.columns:
-                    data[col] = pd.to_numeric(data[col], errors='coerce')
+            # Clean column names
+            data.columns = [col.title() for col in data.columns]
             
-            # Remove any rows with NaN values in critical columns
-            data = data.dropna(subset=['Open', 'High', 'Low', 'Close', 'Volume'])
+            # Ensure we have required columns
+            required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            for col in required_columns:
+                if col not in data.columns:
+                    if col == 'Volume':
+                        data[col] = 1000000  # Default volume
+                    else:
+                        data[col] = data['Close']  # Use close as fallback
             
-            # Ensure index is datetime
-            if not isinstance(data.index, pd.DatetimeIndex):
-                data.index = pd.to_datetime(data.index)
+            # Remove any rows with all NaN values
+            data = data.dropna(how='all')
             
-            # Remove timezone info to avoid conflicts
-            if data.index.tz is not None:
-                data.index = data.index.tz_localize(None)
+            # Forward fill any remaining NaN values
+            data = data.fillna(method='ffill')
+            
+            # Cache the result
+            self.cache[cache_key] = data.copy()
             
             return data
             
         except Exception as e:
-            raise
+            raise Exception(f"Error fetching data for {symbol}: {str(e)}")
     
-    def _clean_market_data(self, df: pd.DataFrame) -> pd.DataFrame:
+    def fetch_multiple_symbols(self, symbols: list, start_date: datetime, 
+                              end_date: datetime) -> Dict[str, pd.DataFrame]:
         """
-        Clean and standardize market data.
+        Fetch data for multiple symbols.
         
         Args:
-            df: Raw market data DataFrame
+            symbols: List of stock symbols
+            start_date: Start date
+            end_date: End date
             
         Returns:
-            pd.DataFrame: Cleaned market data
+            Dict: Dictionary with symbol as key and DataFrame as value
         """
-        # Ensure we have the required columns
-        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        for col in required_columns:
-            if col not in df.columns:
-                raise ValueError(f"Missing required column: {col}")
+        results = {}
         
-        # Remove rows with NaN values
-        df = df.dropna()
-        
-        # Remove rows with zero or negative prices
-        price_columns = ['Open', 'High', 'Low', 'Close']
-        df = df[(df[price_columns] > 0).all(axis=1)]
-        
-        # Remove rows with negative volume
-        df = df[df['Volume'] >= 0]
-        
-        # Ensure High >= Low
-        df = df[df['High'] >= df['Low']]
-        
-        # Round prices to 2 decimal places
-        for col in price_columns:
-            df[col] = df[col].round(2)
-        
-        # Convert volume to int
-        df['Volume'] = df['Volume'].astype(int)
-        
-        return df
+        for symbol in symbols:
+            try:
+                results[symbol] = self.fetch_market_data(symbol, start_date, end_date)
+            except Exception as e:
+                print(f"Error fetching data for {symbol}: {str(e)}")
+                continue
+                
+        return results
     
-    def _calculate_basic_metrics(self, data: pd.DataFrame) -> pd.DataFrame:
+    def get_latest_price(self, symbol: str) -> Optional[float]:
         """
-        Calculate basic financial metrics.
+        Get the latest price for a symbol.
         
         Args:
-            data: Raw market data
+            symbol: Stock symbol
             
         Returns:
-            pd.DataFrame: Data with basic metrics
+            float: Latest closing price
         """
         try:
-            # Ensure we have numeric data
-            data = data.copy()
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(period="1d")
             
-            # Convert to numeric if needed
-            numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-            for col in numeric_columns:
-                if col in data.columns:
-                    data[col] = pd.to_numeric(data[col], errors='coerce')
-            
-            # Calculate returns
-            data['Returns'] = data['Close'].pct_change()
-            
-            # Calculate daily range
-            data['Daily_Range'] = (data['High'] - data['Low']) / data['Close']
-            
-            # Calculate volume ratios
-            data['Volume_MA'] = data['Volume'].rolling(window=20).mean()
-            data['Volume_Ratio'] = data['Volume'] / data['Volume_MA']
-            
-            # Fill NaN values
-            data['Returns'] = data['Returns'].fillna(0)
-            data['Daily_Range'] = data['Daily_Range'].fillna(0)
-            data['Volume_Ratio'] = data['Volume_Ratio'].fillna(1)
-            
-            return data
+            if not data.empty:
+                return data['Close'].iloc[-1]
+            return None
             
         except Exception as e:
-            raise
+            print(f"Error fetching latest price for {symbol}: {str(e)}")
+            return None
+    
+    def get_company_info(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get company information.
+        
+        Args:
+            symbol: Stock symbol
+            
+        Returns:
+            Dict: Company information
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            
+            return {
+                'name': info.get('longName', symbol),
+                'sector': info.get('sector', 'Unknown'),
+                'industry': info.get('industry', 'Unknown'),
+                'market_cap': info.get('marketCap', 0),
+                'pe_ratio': info.get('trailingPE', None),
+                'dividend_yield': info.get('dividendYield', None)
+            }
+            
+        except Exception as e:
+            print(f"Error fetching company info for {symbol}: {str(e)}")
+            return {'name': symbol, 'sector': 'Unknown', 'industry': 'Unknown'}
+    
+    def validate_symbol(self, symbol: str) -> bool:
+        """
+        Validate if a symbol exists and has data.
+        
+        Args:
+            symbol: Stock symbol to validate
+            
+        Returns:
+            bool: True if symbol is valid
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(period="5d")
+            return not data.empty
+            
+        except Exception:
+            return False
+    
+    def clear_cache(self):
+        """Clear the data cache."""
+        self.cache.clear()
