@@ -3,10 +3,42 @@ import numpy as np
 from datetime import datetime
 from typing import Dict, Any
 import warnings
-from backend.utils import DataValidator, MathUtils
-from backend.strategies import BaseStrategy
 
 warnings.filterwarnings('ignore')
+
+class DataValidator:
+    """Data validation utilities."""
+    
+    @staticmethod
+    def validate_ohlcv_data(data: pd.DataFrame) -> bool:
+        """Validate OHLCV data format."""
+        required_cols = ['Close']
+        return all(col in data.columns for col in required_cols) and len(data) > 0
+
+class MathUtils:
+    """Mathematical utilities for performance calculations."""
+    
+    @staticmethod
+    def calculate_annualized_return(total_return: float, num_periods: int, periods_per_year: int = 252) -> float:
+        """Calculate annualized return."""
+        if num_periods <= 0:
+            return 0.0
+        return (1 + total_return) ** (periods_per_year / num_periods) - 1
+    
+    @staticmethod
+    def calculate_volatility(returns: pd.Series, periods_per_year: int = 252) -> float:
+        """Calculate annualized volatility."""
+        if len(returns) == 0:
+            return 0.0
+        return returns.std() * np.sqrt(periods_per_year)
+    
+    @staticmethod
+    def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.02) -> float:
+        """Calculate Sharpe ratio."""
+        if len(returns) == 0 or returns.std() == 0:
+            return 0.0
+        excess_returns = returns.mean() * 252 - risk_free_rate
+        return excess_returns / (returns.std() * np.sqrt(252))
 
 class BacktestEngine:
     """
@@ -15,8 +47,7 @@ class BacktestEngine:
     
     def __init__(self, initial_capital: float = 100000, 
                  commission_rate: float = 0.001,
-                 slippage_rate: float = 0.0005, # 0.05% difference is acceptable
-                 ):
+                 slippage_rate: float = 0.0005):
         """
         Initialize backtesting engine.
         
@@ -28,8 +59,6 @@ class BacktestEngine:
         self.initial_capital = initial_capital
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
-        
-        # Reset portfolio state
         self.reset_portfolio()
             
     def reset_portfolio(self):
@@ -50,8 +79,7 @@ class BacktestEngine:
         self.total_commission = 0
         self.total_slippage = 0
     
-    def run_backtest(self, strategy: BaseStrategy, data: pd.DataFrame, 
-                    symbol: str) -> Dict[str, Any]:
+    def run_backtest(self, strategy, data: pd.DataFrame, symbol: str) -> Dict[str, Any]:
         """
         Run complete backtest for a strategy.
         
@@ -63,23 +91,14 @@ class BacktestEngine:
         Returns:
             Dict: Comprehensive backtest results
         """        
-        # Validate data
         if not DataValidator.validate_ohlcv_data(data):
             raise ValueError("Invalid market data provided")
         
-        # Reset portfolio
         self.reset_portfolio()
-        
-        # Generate signals
         signals = strategy.generate_signals(data)
-        
-        # Execute trades
         self._execute_backtest(strategy, data, signals, symbol)
-        
-        # Calculate performance metrics
         results = self._calculate_performance_metrics(data, symbol)
         
-        # Add strategy-specific information
         results['strategy_name'] = strategy.name
         results['strategy_params'] = strategy.params
         results['symbol'] = symbol
@@ -89,75 +108,163 @@ class BacktestEngine:
         
         return results
     
-    def _execute_backtest(self, strategy: BaseStrategy, data: pd.DataFrame, 
+    def _execute_backtest(self, strategy, data: pd.DataFrame, 
                          signals: pd.Series, symbol: str):
         """Execute the backtest day by day."""
-
-        executed_trades = 0
+        current_trade_entry = None  # Track current trade for proper exit handling
         
         for i, (date, row) in enumerate(data.iterrows()):
-            # Get signal for this date
-            if i < len(signals):
-                signal = signals.iloc[i]
+            # Get signal for current date, handle missing signals
+            if date in signals.index:
+                signal = signals.loc[date]
             else:
                 signal = 0
             
-            # Skip if no signal
-            if signal == 0:
-                continue
-                            
-            # Execute trade
+            # Apply risk management
+            signal = strategy.apply_risk_management(row, signal)
+
             if signal != 0:
-                self._execute_trade(signal, row, date, symbol, strategy)
-                executed_trades += 1
+                trade_result = self._execute_trade(signal, row, date, symbol, strategy)
+                if trade_result:
+                    if signal > 0:  # Entry
+                        current_trade_entry = trade_result
+                    elif signal < 0 and current_trade_entry:  # Exit
+                        # Calculate P&L for completed trade
+                        self._finalize_trade(current_trade_entry, trade_result, date)
+                        current_trade_entry = None
             
-            # Update portfolio value
             self._update_portfolio_value(row, date, symbol)
         
+        # Close any remaining open position at the end
+        if self.positions.get(symbol, 0) != 0:
+            final_row = data.iloc[-1]
+            self._close_position(symbol, final_row['Close'], data.index[-1], strategy)
+        
     def _execute_trade(self, signal: int, market_data: pd.Series, 
-                      date: datetime, symbol: str, strategy: BaseStrategy):
-        """Execute a single trade"""
-        
-        # Get price
+                      date: datetime, symbol: str, strategy):
+        """Execute a single trade with improved position sizing."""
         price = market_data['Close']
-        
-        # Get current position
         current_position = self.positions.get(symbol, 0)
         
-        if signal > 0:  # Buy signal
-            # Only buy if we don't have a position i.e. we are holding
-            if current_position == 0:
-                # Use fixed position size
-                max_investment = self.cash * 0.60  # Use 60% of cash
-                shares_to_buy = int(max_investment / price)
-                
-                # If we can afford to buy the shares
-                if shares_to_buy > 0:
-                    trade_value = shares_to_buy * price
+        # Apply slippage
+        if signal > 0:
+            trade_price = price * (1 + self.slippage_rate)
+        else:
+            trade_price = price * (1 - self.slippage_rate)
+
+        trade_result = None
+
+        if signal > 0 and current_position <= 0:  # Buy signal (enter long or cover short)
+            if current_position < 0:  # Cover short first
+                self._close_position(symbol, trade_price, date, strategy)
             
-                    self.cash -= trade_value
+            # Enter new long position
+            position_size = strategy.calculate_position_size(market_data)
+            investment = self.portfolio_value * position_size
+            shares_to_buy = int(investment / trade_price)
+            
+            if shares_to_buy > 0:
+                trade_value = shares_to_buy * trade_price
+                commission = trade_value * self.commission_rate
+                
+                if self.cash >= trade_value + commission:
+                    self.cash -= (trade_value + commission)
                     self.positions[symbol] = shares_to_buy
+                    self.total_commission += commission
+                    slippage_cost = shares_to_buy * (trade_price - price)
+                    self.total_slippage += slippage_cost
+                    strategy.update_position(1, trade_price, date)
                     
-                    # Record trade
-                    self._record_trade(date, symbol, 'BUY', shares_to_buy, price, 0, 0)
+                    trade_result = {
+                        'entry_date': date,
+                        'entry_price': trade_price,
+                        'shares': shares_to_buy,
+                        'entry_commission': commission,
+                        'entry_slippage': slippage_cost
+                    }
+                    
+                    self._record_trade(date, symbol, 'BUY', shares_to_buy, trade_price, commission, slippage_cost)
                 
-        elif signal < 0:  # Sell signal
-            # Only sell if we have a position
-            if current_position > 0:
-                shares_to_sell = current_position
-                trade_value = shares_to_sell * price
-                
-                # Execute sell
-                self.cash += trade_value
-                self.positions[symbol] = 0
-                
-                # Record trade
-                self._record_trade(date, symbol, 'SELL', shares_to_sell, price, 0, 0)
+        elif signal < 0 and current_position > 0:  # Sell signal (exit long)
+            trade_result = self._close_position(symbol, trade_price, date, strategy)
+
+        return trade_result
+    
+    def _close_position(self, symbol: str, trade_price: float, date: datetime, strategy):
+        """Close existing position."""
+        current_position = self.positions.get(symbol, 0)
+        if current_position == 0:
+            return None
+            
+        shares_to_sell = abs(current_position)
+        trade_value = shares_to_sell * trade_price
+        commission = trade_value * self.commission_rate
+        
+        if current_position > 0:  # Closing long position
+            self.cash += (trade_value - commission)
+            action = 'SELL'
+        else:  # Covering short position
+            self.cash -= (trade_value + commission)
+            action = 'COVER'
+        
+        self.positions[symbol] = 0
+        self.total_commission += commission
+        slippage_cost = shares_to_sell * abs(trade_price * self.slippage_rate)
+        self.total_slippage += slippage_cost
+        strategy.update_position(0, trade_price, date)
+        
+        self._record_trade(date, symbol, action, shares_to_sell, trade_price, commission, slippage_cost)
+        
+        return {
+            'exit_date': date,
+            'exit_price': trade_price,
+            'shares': shares_to_sell,
+            'exit_commission': commission,
+            'exit_slippage': slippage_cost
+        }
+
+    def _finalize_trade(self, entry_trade: Dict, exit_trade: Dict, exit_date: datetime):
+        """Finalize a completed trade with P&L calculation."""
+        if not entry_trade or not exit_trade:
+            return
+            
+        pnl_gross = (exit_trade['exit_price'] - entry_trade['entry_price']) * entry_trade['shares']
+        total_commission = entry_trade['entry_commission'] + exit_trade['exit_commission']
+        total_slippage = entry_trade['entry_slippage'] + exit_trade['exit_slippage']
+        pnl_net = pnl_gross - total_commission - total_slippage
+        
+        holding_days = (exit_date - entry_trade['entry_date']).days
+        
+        # Update trade records with P&L
+        if self.trades:
+            # Find the corresponding buy trade and update
+            for trade in reversed(self.trades):
+                if (trade['action'] == 'BUY' and 
+                    trade['date'] == entry_trade['entry_date'] and
+                    'pnl' not in trade):
+                    trade['pnl'] = pnl_net
+                    trade['pnl_pct'] = pnl_net / (entry_trade['entry_price'] * entry_trade['shares'])
+                    trade['holding_days'] = holding_days
+                    break
+            
+            # Update the sell trade as well
+            for trade in reversed(self.trades):
+                if (trade['action'] == 'SELL' and 
+                    trade['date'] == exit_date and
+                    'pnl' not in trade):
+                    trade['pnl'] = pnl_net
+                    trade['pnl_pct'] = pnl_net / (entry_trade['entry_price'] * entry_trade['shares'])
+                    trade['holding_days'] = holding_days
+                    break
+        
+        if pnl_net > 0:
+            self.winning_trades += 1
+        else:
+            self.losing_trades += 1
 
     def _record_trade(self, date: datetime, symbol: str, action: str, 
                      shares: int, price: float, commission: float, slippage: float):
         """Record a trade for analysis."""
-        
         trade = {
             'date': date,
             'symbol': symbol,
@@ -167,218 +274,112 @@ class BacktestEngine:
             'value': shares * price,
             'commission': commission,
             'slippage': slippage,
-            'net_value': shares * price - commission
+            'net_value': shares * price - commission if action == 'BUY' else shares * price + commission
         }
         
         self.trades.append(trade)
         self.total_trades += 1
-        
-        # Calculate P&L for sell trades
-        if action == 'SELL' and len(self.trades) > 1:
-            # Find corresponding buy trade
-            for prev_trade in reversed(self.trades[:-1]):
-                if prev_trade['symbol'] == symbol and prev_trade['action'] == 'BUY':
-                    pnl = ((price - prev_trade['price']) * shares) - commission - prev_trade['commission']
-                    trade['pnl'] = pnl
-                    trade['pnl_pct'] = pnl / (prev_trade['price'] * shares)
-                    trade['holding_days'] = (date - prev_trade['date']).days
-                    
-                    if pnl > 0:
-                        self.winning_trades += 1
-                    else:
-                        self.losing_trades += 1
-                    break
             
     def _update_portfolio_value(self, market_data: pd.Series, date: datetime, symbol: str):
         """Update portfolio value and equity curve."""
-        
-        # Calculate position value
-        position_value = 0
-        if symbol in self.positions and self.positions[symbol] > 0:
-            position_value = self.positions[symbol] * market_data['Close']
-        
+        position_value = self.positions.get(symbol, 0) * market_data['Close']
         self.portfolio_value = self.cash + position_value
         
-        # Update equity curve
+        if len(self.equity_curve) > 0:
+            prev_value = self.equity_curve[-1]['portfolio_value']
+            daily_return = (self.portfolio_value - prev_value) / prev_value if prev_value != 0 else 0
+            self.daily_returns.append(daily_return)
+        else:
+            self.daily_returns.append(0.0)
+
         self.equity_curve.append({
             'date': date,
             'portfolio_value': self.portfolio_value,
-            'cash': self.cash,
-            'position_value': position_value,
-            'daily_return': (self.portfolio_value / self.initial_capital) - 1 # Percentage return
         })
         
-        # Calculate daily returns
-        if len(self.equity_curve) > 1:
-            prev_value = self.equity_curve[-2]['portfolio_value']
-            daily_return = (self.portfolio_value - prev_value) / prev_value
-            self.daily_returns.append(daily_return)
-        else:
-            # First day there is no return
-            self.daily_returns.append(0.0)
-        
-        # Update drawdown
         self.max_portfolio_value = max(self.max_portfolio_value, self.portfolio_value)
-        drawdown = (self.portfolio_value - self.max_portfolio_value) / self.max_portfolio_value
+        drawdown = (self.portfolio_value - self.max_portfolio_value) / self.max_portfolio_value if self.max_portfolio_value != 0 else 0
         self.drawdown_series.append(drawdown)
     
     def _calculate_performance_metrics(self, data: pd.DataFrame, symbol: str) -> Dict[str, Any]:
         """Calculate comprehensive performance metrics."""
-        
-        # Convert to DataFrames for easier analysis
-        equity_df = pd.DataFrame(self.equity_curve)
+        if not self.equity_curve:
+            return {}
+
+        equity_df = pd.DataFrame(self.equity_curve).set_index('date')['portfolio_value']
         trades_df = pd.DataFrame(self.trades) if self.trades else pd.DataFrame()
         
         total_return = (self.portfolio_value - self.initial_capital) / self.initial_capital
-        annualized_return = (self.portfolio_value / self.initial_capital) ** (252 / len(data)) - 1
-
-        # Risk metrics
+        annualized_return = MathUtils.calculate_annualized_return(total_return, len(data))
+        
         returns_series = pd.Series(self.daily_returns)
-        volatility = MathUtils.calculate_volatility(returns_series, True) if len(returns_series) > 1 else 0
-        sharpe_ratio = MathUtils.calculate_sharpe_ratio(returns_series) if len(returns_series) > 1 else 0
+        volatility = MathUtils.calculate_volatility(returns_series)
+        sharpe_ratio = MathUtils.calculate_sharpe_ratio(returns_series)
         
-        # Drawdown metrics
         max_drawdown = min(self.drawdown_series) if self.drawdown_series else 0
-        drawdown_df = pd.Series(self.drawdown_series)
         
-        # Calculate drawdown duration
-        drawdown_periods = []
-        in_drawdown = False
-        drawdown_start = None
+        win_rate = self.winning_trades / max(self.total_trades, 1)
         
-        for i, dd in enumerate(drawdown_df):
-            if dd < 0 and not in_drawdown:
-                in_drawdown = True
-                drawdown_start = i
-            elif dd >= 0 and in_drawdown:
-                in_drawdown = False
-                if drawdown_start is not None:
-                    drawdown_periods.append(i - drawdown_start)
-        
-        avg_drawdown_duration = np.mean(drawdown_periods) if drawdown_periods else 0
-        max_drawdown_duration = max(drawdown_periods) if drawdown_periods else 0
-        
-        # Trade analysis
-        win_rate = self.winning_trades / self.total_trades if self.total_trades > 0 else 0
-        
-        # Calculate average win/loss
-        winning_trades_pnl = []
-        losing_trades_pnl = []
-        
+        # Enhanced trade analysis
         if not trades_df.empty and 'pnl' in trades_df.columns:
-            winning_trades_pnl = trades_df[trades_df['pnl'] > 0]['pnl'].tolist()
-            losing_trades_pnl = trades_df[trades_df['pnl'] < 0]['pnl'].tolist()
-        
-        avg_win = np.mean(winning_trades_pnl) if winning_trades_pnl else 0
-        avg_loss = np.mean(losing_trades_pnl) if losing_trades_pnl else 0
-        profit_factor = abs(avg_win * self.winning_trades / (avg_loss * self.losing_trades)) if avg_loss != 0 and self.losing_trades > 0 else 0
-        
-        # Market comparison
-        market_return = (data['Close'].iloc[-1] - data['Close'].iloc[0]) / data['Close'].iloc[0]
-        excess_return = total_return - market_return
-        
-        # Information ratio
-        tracking_error = 0
-        information_ratio = 0
-        
-        if len(returns_series) > 1:
-            market_returns = data['Close'].pct_change().dropna()
-            if len(market_returns) == len(returns_series):
-                excess_returns = returns_series - market_returns
-                tracking_error = excess_returns.std() * np.sqrt(252)
-                information_ratio = excess_returns.mean() / excess_returns.std() * np.sqrt(252) if excess_returns.std() > 0 else 0
-        
-        # Performance metrics dictionary
+            pnl_series = trades_df[trades_df['pnl'].notna()]['pnl']
+            if not pnl_series.empty:
+                avg_win = pnl_series[pnl_series > 0].mean() if not pnl_series[pnl_series > 0].empty else 0
+                avg_loss = pnl_series[pnl_series < 0].mean() if not pnl_series[pnl_series < 0].empty else 0
+                profit_factor = abs(pnl_series[pnl_series > 0].sum() / pnl_series[pnl_series < 0].sum()) if pnl_series[pnl_series < 0].sum() != 0 else float('inf')
+                
+                # Add entry/exit date columns for trade analysis
+                if 'action' in trades_df.columns:
+                    buy_trades = trades_df[trades_df['action'] == 'BUY'].copy()
+                    sell_trades = trades_df[trades_df['action'] == 'SELL'].copy()
+                    
+                    if not buy_trades.empty and not sell_trades.empty:
+                        # Match buy and sell trades
+                        matched_trades = []
+                        for _, buy_trade in buy_trades.iterrows():
+                            # Find corresponding sell trade
+                            future_sells = sell_trades[sell_trades['date'] > buy_trade['date']]
+                            if not future_sells.empty:
+                                sell_trade = future_sells.iloc[0]
+                                matched_trades.append({
+                                    'entry_date': buy_trade['date'],
+                                    'exit_date': sell_trade['date'],
+                                    'entry_price': buy_trade['price'],
+                                    'exit_price': sell_trade['price'],
+                                    'shares': buy_trade['shares'],
+                                    'pnl': sell_trade.get('pnl', 0),
+                                    'holding_days': (sell_trade['date'] - buy_trade['date']).days
+                                })
+                        
+                        if matched_trades:
+                            trades_df = pd.DataFrame(matched_trades)
+            else:
+                avg_win = avg_loss = profit_factor = 0
+        else:
+            avg_win = avg_loss = profit_factor = 0
+
         metrics = {
-            # Return metrics
             'total_return': total_return,
             'annualized_return': annualized_return,
-            'market_return': market_return,
-            'excess_return': excess_return,
             'final_portfolio_value': self.portfolio_value,
-            
-            # Risk metrics
             'volatility': volatility,
             'sharpe_ratio': sharpe_ratio,
-            'information_ratio': information_ratio,
-            'tracking_error': tracking_error,
-            
-            # Drawdown metrics
             'max_drawdown': max_drawdown,
-            'avg_drawdown_duration': avg_drawdown_duration,
-            'max_drawdown_duration': max_drawdown_duration,
-            
-            # Trade metrics
-            'total_trades': self.total_trades,
+            'total_trades': len(trades_df) if not trades_df.empty else 0,
             'winning_trades': self.winning_trades,
             'losing_trades': self.losing_trades,
             'win_rate': win_rate,
             'avg_win': avg_win,
             'avg_loss': avg_loss,
             'profit_factor': profit_factor,
-            
-            # Cost metrics
             'total_commission': self.total_commission,
             'total_slippage': self.total_slippage,
             'commission_pct': self.total_commission / self.initial_capital,
             'slippage_pct': self.total_slippage / self.initial_capital,
-            
-            # Detailed data
             'equity_curve': equity_df,
             'trades': trades_df,
             'daily_returns': returns_series,
-            'drawdown_series': drawdown_df
-        };
+            'drawdown_series': pd.Series(self.drawdown_series, index=equity_df.index)
+        }
         
         return metrics
-    
-    def generate_performance_report(self, results: Dict[str, Any]) -> str:
-        """Generate a formatted performance report."""
-        
-        report = f"""
-=== BACKTEST PERFORMANCE REPORT ===
-Strategy: {results['strategy_name']}
-Symbol: {results['symbol']}
-Period: {results['start_date'].strftime('%Y-%m-%d')} to {results['end_date'].strftime('%Y-%m-%d')}
-Total Days: {results['total_days']}
-
-=== RETURN METRICS ===
-Total Return:           {results['total_return']:>10.2%}
-Annualized Return:      {results['annualized_return']:>10.2%}
-Market Return:          {results['market_return']:>10.2%}
-Excess Return:          {results['excess_return']:>10.2%}
-Final Portfolio Value:  ${results['final_portfolio_value']:>10,.2f}
-
-=== RISK METRICS ===
-Volatility (Annual):    {results['volatility']:>10.2%}
-Sharpe Ratio:          {results['sharpe_ratio']:>10.2f}
-Information Ratio:     {results['information_ratio']:>10.2f}
-Tracking Error:        {results['tracking_error']:>10.2%}
-
-=== DRAWDOWN METRICS ===
-Max Drawdown:          {results['max_drawdown']:>10.2%}
-Avg Drawdown Duration: {results['avg_drawdown_duration']:>10.1f} days
-Max Drawdown Duration: {results['max_drawdown_duration']:>10.0f} days
-
-=== TRADE METRICS ===
-Total Trades:          {results['total_trades']:>10}
-Winning Trades:        {results['winning_trades']:>10}
-Losing Trades:         {results['losing_trades']:>10}
-Win Rate:              {results['win_rate']:>10.2%}
-Average Win:           ${results['avg_win']:>10.2f}
-Average Loss:          ${results['avg_loss']:>10.2f}
-Profit Factor:         {results['profit_factor']:>10.2f}
-
-=== COST ANALYSIS ===
-Total Commission:      ${results['total_commission']:>10.2f}
-Total Slippage:        ${results['total_slippage']:>10.2f}
-Commission %:          {results['commission_pct']:>10.2%}
-Slippage %:            {results['slippage_pct']:>10.2%}
-
-=== STRATEGY PARAMETERS ===
-"""
-        
-        for key, value in results['strategy_params'].items():
-            report += f"{key}: {value}\n"
-        
-        return report
