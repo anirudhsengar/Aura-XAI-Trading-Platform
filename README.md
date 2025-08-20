@@ -1,126 +1,168 @@
 ## *Aura - The Explainable AI Trading & Investment Platform*
 
 *   *Project Name:* Aura
-*   *Version:* 1.0
-*   *Date:* 2025-07-03
+*   *Version:* 1.0 (Implemented)
+*   *Date:* 2025-08-07
 *   *Project Lead:* anirudhsengar
-*   *Status:* Conception & Planning
 
 ---
 
 ### *1. Executive Summary*
 
-Aura is a web-based platform designed to demystify algorithmic trading for retail investors, data science students, and quantitative analysts. Traditional trading platforms operate as "black boxes," where the logic behind trade signals is opaque. Aura's core innovation is the integration of *Explainable AI (XAI)* to provide transparent, intuitive, and trustworthy insights into why its AI-driven strategies make certain decisions.
+Aura is a **fully functional** web-based platform that successfully demystifies algorithmic trading for retail investors, data science students, and quantitative analysts. The platform has achieved its core innovation of integrating *Explainable AI (XAI)* to provide transparent, intuitive, and trustworthy insights into AI-driven trading strategies.
 
-The platform will ingest financial market data and alternative data (like news sentiment), allow users to backtest both traditional and AI-based trading strategies, and critically, use XAI models (like SHAP) to visualize the exact factors—be it a technical indicator, a news headline, or a market trend—that contributed to a buy or sell signal. This transparency aims to build user trust, provide a powerful educational tool, and enable more informed investment decisions.
-
----
-
-### *2. Problem Statement*
-
-The world of algorithmic trading is powerful but largely inaccessible and intimidating to the average investor. Key problems include:
-
-*   *The "Black Box" Problem:* Most trading algorithms, especially those using complex machine learning models, do not explain their reasoning. This lack of transparency makes it difficult for users to trust the signals, understand the strategy's weaknesses, and take control of their investments.
-*   *High Barrier to Entry:* Developing, backtesting, and deploying a trading strategy requires significant expertise in programming, finance, and data science. The tools are often disparate and complex.
-*   *Overload of Information:* Investors are bombarded with news, social media, and technical indicators. It's nearly impossible to manually synthesize this information into a coherent trading strategy.
-*   *Lack of Educational Tools:* Aspiring quantitative analysts and students lack practical platforms where they can see the direct impact of different data points on a model's decision-making process in a financial context.
+**✅ CURRENT CAPABILITIES:**
+- Complete backtesting platform with 4+ trading strategies
+- Advanced LSTM deep learning strategy with SHAP explanations
+- Real-time market data integration via Yahoo Finance
+- Comprehensive technical indicator analysis (15+ indicators)
+- Interactive AI explanations with feature importance
+- Professional-grade risk management and performance analytics
+- User-friendly Streamlit interface with advanced visualizations
 
 ---
 
-### *3. Proposed Solution & Value Proposition*
+### *2. ✅ Implemented Features*
 
-Aura addresses these problems by providing a unified, user-friendly platform with *explainability at its core.*
+**🎯 FULLY OPERATIONAL FEATURES:**
 
-*   *Vision:* To become the most transparent and educational platform for developing and understanding AI-driven investment strategies.
-*   *Core Solution:* A dashboard where users can select a financial asset (e.g., a stock), apply a pre-built or custom strategy, and see not only the historical performance but also a clear, visual breakdown of why each trade was executed.
+#### *Data Management*
+- **Real-time data ingestion** from Yahoo Finance API
+- **Comprehensive market data validation** and cleaning
+- **Advanced caching system** with expiration and size management
+- **Multi-symbol support** (AAPL, GOOGL, MSFT, AMZN, TSLA, NFLX, META, NVDA, SPY)
+- **Robust error handling** for data quality and API failures
 
-*Key Value Propositions:*
+#### *AI & Strategy Engine*
+- **4 Complete Trading Strategies:**
+  1. **Simple Moving Average Crossover** - Traditional technical analysis
+  2. **Mean Reversion Strategy** - Bollinger Bands + RSI based
+  3. **Momentum Strategy** - Multi-indicator momentum detection
+  4. **LSTM Deep Learning Strategy** - Advanced neural network with SHAP
+- **15+ Technical Indicators** automatically calculated
+- **Advanced LSTM Model** with:
+  - Multi-layer neural network architecture
+  - Early stopping and learning rate reduction
+  - Confidence-based signal generation
+  - Periodic model retraining
 
-*   *For the Retail Investor:* *Trust and Confidence.* Understand why the system suggests a trade before you risk your capital. Move from blind faith to informed decision-making.
-*   *For the Student/Learner:* *An Interactive Educational Tool.* See the tangible effect of a news sentiment score or a moving average crossover on a model's output. A practical application of data science theory.
-*   *For the Quantitative Analyst:* *Rapid Prototyping and Debugging.* Quickly test hypotheses and understand why a strategy is failing. Use the XAI insights to refine models and discover new sources of alpha.
+#### *Professional Backtesting Engine*
+- **Event-driven backtesting** with realistic execution
+- **Comprehensive risk management**: Stop-loss, take-profit, position sizing
+- **Advanced performance metrics**: Sharpe ratio, max drawdown, profit factor
+- **Transaction cost modeling**: Commission and slippage simulation
+- **Trade-by-trade analysis** with P&L attribution
 
----
+#### *Explainable AI Dashboard*
+- **SHAP Integration**: Deep learning model explanations
+- **Feature Importance Analysis**: Real-time and historical
+- **Interactive Visualizations**: Waterfall charts and feature rankings
+- **Model Confidence Metrics**: SHAP confidence, feature consistency
+- **Narrative Explanations**: Human-readable AI decision reasoning
+- **Export Capabilities**: HTML reports and JSON data export
 
-### *4. Core Features (Functional Requirements)*
-
-#### *Module 1: Data Ingestion & Processing*
-*   *F-1.1:* Automated ingestion of daily (or hourly) OHLCV (Open, High, Low, Close, Volume) data for US equities from a reliable provider (e.g., Alpaca, Polygon.io, Yahoo Finance).
-*   *F-1.2:* Automated ingestion of financial news headlines and articles from sources like Finnhub or scraped from public RSS feeds.
-*   *F-1.3:* A data processing pipeline to clean, align, and merge time-series financial data with unstructured news data.
-*   *F-1.4:* Feature Engineering: The system will automatically calculate a suite of common technical indicators (e.g., RSI, MACD, Bollinger Bands, Moving Averages).
-
-#### *Module 2: AI & Strategy Core*
-*   *F-2.1: Sentiment Analysis:*
-    *   Utilize a pre-trained NLP model (e.g., FinBERT from Hugging Face Transformers) to analyze news headlines and assign a daily sentiment score (e.g., from -1.0 to +1.0) for each asset.
-*   *F-2.2: Forecasting Model (Optional - Phase 2):*
-    *   Implement a forecasting model (e.g., LSTM or ARIMA) to predict the next day's price movement (Up/Down) or price range.
-*   *F-2.3: Strategy Library:*
-    *   Provide a set of pre-built strategies for users to test (e.g., "Simple Momentum," "Sentiment + Momentum," "Full AI Model").
-    *   Allow for basic strategy customization (e.g., changing the lookback period for an indicator).
-
-#### *Module 3: Backtesting Engine*
-*   *F-3.1:* A robust, event-driven backtesting engine that simulates the execution of a strategy on historical data.
-*   *F-3.2:* Calculation and display of key performance metrics: Total Return, Sharpe Ratio, Max Drawdown, Win/Loss Ratio, and an equity curve chart.
-*   *F-3.3:* Generation of a trade log showing every buy, sell, and hold decision made during the backtest period.
-
-#### *Module 4: The Explainable AI (XAI) Dashboard - *The Core Innovation**
-*   *F-4.1:* For every trade signal generated by an AI-based strategy, Aura will use an XAI library (primarily *SHAP*) to calculate feature importance.
-*   *F-4.2:* *SHAP Waterfall/Force Plots:* The UI will display a dynamic chart for each trade decision, showing:
-    *   The model's base value (average prediction).
-    *   The final prediction (e.g., "BUY").
-    *   The features that "pushed" the prediction up or down, and by how much. For example:
-        *   positive news sentiment (+0.15)
-        *   RSI < 30 (+0.12)
-        *   price above 50-day MA (+0.08)
-        *   high market volatility (-0.05)
-*   *F-4.3:* A global feature importance chart showing which factors were most influential over the entire backtest period.
-
-#### *Module 5: Frontend & User Interface*
-*   *F-5.1:* A clean, intuitive web interface built with a modern framework (e.g., React or Vue).
-*   *F-5.2:* An interactive charting library (e.g., Chart.js, D3.js, or TradingView Lightweight Charts) to display price data, indicators, and trade entry/exit points.
-*   *F-5.3:* A main dashboard for selecting an asset, a date range, and a strategy.
-*   *F-5.4:* A dedicated results view that integrates the performance metrics, equity curve, and the interactive XAI plots.
+#### *Advanced Frontend Interface*
+- **Professional Streamlit Interface** with modern design
+- **Interactive Charts**: Plotly-based equity curves and performance analytics
+- **Real-time Configuration**: Dynamic parameter adjustment
+- **Progress Tracking**: Live backtesting progress indicators
+- **Export Features**: Downloadable reports and analysis
+- **Mobile-Responsive Design**: Works on all devices
 
 ---
 
-### *5. System Architecture & Tech Stack*
+### *3. 🏗️ Technical Implementation*
 
-*   *Architecture Style:* Microservices-oriented or a modular monolith. A single backend application (Flask/FastAPI) will handle API requests, with separate scripts/workers for data ingestion and model training.
+**✅ PRODUCTION-READY ARCHITECTURE:**
 
-*   *Tech Stack:*
-    *   *Backend:* *Python 3.10+*
-        *   *Web Framework:* *Flask* or *FastAPI* (for serving the REST API).
-        *   *Data Science:* *Pandas, **NumPy, **Scikit-learn*.
-        *   *AI/ML:* *Hugging Face Transformers* (for NLP), *TensorFlow/PyTorch* (for forecasting models).
-        *   *XAI Library:* *SHAP*.
-        *   *Financial Libraries:* yfinance (for MVP data), ta (for technical analysis).
-    *   *Frontend:* *React.js* or *Vue.js*.
-        *   *Charting:* lightweight-charts by TradingView or Chart.js.
-    *   *Data Storage:* *File-based storage* using JSON files for configurations and results, Parquet/CSV files for market data.
-    *   *Deployment:* *Docker* for containerization, hosted on a cloud provider like *AWS, Google Cloud, or Heroku*.
+```
+Frontend (Streamlit) → Backend APIs → Data Sources
+     ↓                    ↓              ↓
+┌─────────────┐  ┌─────────────────┐  ┌─────────────┐
+│  UI Layer   │  │  Strategy Core   │  │ Data Layer  │
+│             │  │                 │  │             │
+│ • Config    │  │ • Strategies    │  │ • Yahoo API │
+│ • Charts    │  │ • Backtester    │  │ • Caching   │
+│ • Results   │  │ • Risk Mgmt     │  │ • Validation│
+│ • AI Plots  │  │ • SHAP/XAI      │  │ • Features  │
+└─────────────┘  └─────────────────┘  └─────────────┘
+```
 
-*   *Data Flow Diagram:*
-    1.  *Data Ingestion:* A scheduled worker script fetches data from APIs (Market Data, News) -> Stores in local Parquet/CSV files.
-    2.  *User Request:* User selects Asset & Strategy on Frontend -> Sends API request to Python Backend.
-    3.  *Backend Processing:*
-        *   Backend loads relevant historical data from local files.
-        *   Applies feature engineering (indicators, sentiment scores).
-        *   Runs the backtesting simulation.
-        *   For each AI decision, it runs the trained model and then passes the model and data instance to the SHAP explainer.
-    4.  *Response:* The backend returns a JSON object containing performance metrics, the trade log, and SHAP values for key decisions.
-    5.  *Frontend Visualization:* The Frontend renders the charts, tables, and the interactive XAI force plots.
+**✅ IMPLEMENTED TECH STACK:**
+- **Backend**: Python 3.10+ with modern pandas methods
+- **AI/ML**: TensorFlow 2.x + SHAP for explainability
+- **Data**: Advanced feature engineering with 15+ indicators
+- **Frontend**: Streamlit with Plotly visualizations
+- **Risk Management**: Professional-grade position sizing and stops
 
 ---
 
+### *4. 🚀 Quick Start Guide*
 
-### *6. Risks and Mitigations*
+**INSTALLATION & SETUP:**
+```bash
+# 1. Clone the repository
+git clone https://github.com/anirudhsengar/Aura.git
+cd Aura
 
-*   *Risk:* Data Quality & Cost. Free data sources can be unreliable.
-    *   *Mitigation:* Start with free sources (yfinance) for the MVP. For a production system, budget for a premium data provider (e.g., Alpaca, Polygon).
-*   *Risk:* Model Complexity. AI models can be complex to train and interpret.
-    *   *Mitigation:* Start with simpler, proven models (like Gradient Boosting) before moving to complex deep learning. The entire premise of XAI is to mitigate this risk.
-*   *Risk:* Overfitting. Strategies may look great on historical data but fail in live markets.
-    *   *Mitigation:* Be rigorous in backtesting methodology. Clearly communicate that "past performance is not indicative of future results." Use out-of-sample testing.
-*   *Risk:* Scope Creep. The desire to add more features can delay the core product.
-    *   *Mitigation:* Adhere strictly to the phased roadmap. Focus on delivering the core XAI experience first and foremost.
+# 2. Install dependencies
+pip install streamlit pandas numpy plotly yfinance scikit-learn
+pip install tensorflow shap ta  # For LSTM + AI explanations
+
+# 3. Run the application
+streamlit run main.py
+```
+
+**USAGE:**
+1. **Select Stock**: Choose from 9 pre-configured symbols
+2. **Set Date Range**: Minimum 300 days for LSTM strategies
+3. **Choose Strategy**: 4 available strategies with full customization
+4. **Configure Parameters**: Use Quick Test Config for LSTM
+5. **Run Analysis**: Get comprehensive results in 2-5 minutes
+6. **Explore AI Explanations**: SHAP-based feature importance (LSTM only)
+
+---
+
+### *5. 🧠 AI Explainability Features*
+
+**✅ ADVANCED XAI CAPABILITIES:**
+
+- **SHAP Waterfall Plots**: Visual breakdown of each prediction
+- **Feature Importance Rankings**: Top 10 most influential factors
+- **Confidence Metrics**: Model certainty scores
+- **Narrative Explanations**: Human-readable decision logic
+- **Market Context**: Current conditions analysis
+- **Export Options**: HTML/JSON report generation
+
+**EXAMPLE EXPLANATION:**
+```
+📝 Model Reasoning:
+The LSTM neural network identified sequential patterns suggesting BUY signal.
+
+🎯 Top Features:
+1. RSI (14.2%) - Oversold condition
+2. MACD Signal (12.8%) - Bullish crossover
+3. Volume Ratio (11.3%) - Above average volume
+4. Price Momentum (9.7%) - Positive trend
+5. Bollinger Position (8.4%) - Near lower band
+```
+
+---
+
+### *7. 🔧 Configuration Options*
+
+**✅ FULLY CUSTOMIZABLE:**
+
+**LSTM Quick Test Config** (Recommended for testing):
+- Lookback Window: 30 days
+- Signal Threshold: 0.4 (generates more signals)
+- Epochs: 25 (faster training)
+- SHAP Explanations: Enabled
+
+**Production Config Options:**
+- **Architecture**: LSTM units, dropout, lookback window
+- **Training**: Learning rate, batch size, epochs, early stopping
+- **Risk**: Position sizing, stop loss, take profit
+- **Advanced**: Retraining frequency, SHAP settings
+
+---

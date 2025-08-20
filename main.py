@@ -1,580 +1,911 @@
 import streamlit as st
-import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
 import warnings
+import sys
+import os
+import pandas as pd
 import numpy as np
-from backend.data_manager import DataManager
-from backend.feature_engine import FeatureEngine
-from backend.strategies import StrategyFactory
-from backend.backtester import BacktestEngine
-from backend.explainer import Explainer
-from backend.utils import DataValidator
+
+# Add backend to path
+backend_path = os.path.join(os.path.dirname(__file__), 'backend')
+if backend_path not in sys.path:
+    sys.path.append(backend_path)
+
+# Initialize backend availability flag
+BACKEND_AVAILABLE = False
+
+try:
+    from backend.data_manager import DataManager
+    from backend.feature_engine import FeatureEngine
+    from backend.strategies import BaseStrategy
+    from backend.backtester import BacktestEngine
+    from backend.explainer import TradingStrategyExplainer
+    BACKEND_AVAILABLE = True
+except ImportError as e:
+    st.error(f"Backend import error: {str(e)}")
+    st.error("Please ensure all backend files are properly installed:")
+    st.code("""
+    Required files:
+    - backend/data_manager.py
+    - backend/feature_engine.py  
+    - backend/strategies.py
+    - backend/backtester.py
+    - backend/explainer.py
+    """)
+    st.stop()
 
 warnings.filterwarnings('ignore')
 
 def load_data(symbol, start_date, end_date):
-    """Load market data."""
+    """Load market data with enhanced error handling."""
     try:
-        # Ensure dates are datetime objects
+        # Validate inputs
+        if not symbol or symbol.strip() == "":
+            raise ValueError("Symbol cannot be empty")
+        
+        if start_date >= end_date:
+            raise ValueError("Start date must be before end date")
+        
+        # Convert to datetime if needed
         if isinstance(start_date, str):
-            start_date = pd.to_datetime(start_date)
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
         if isinstance(end_date, str):
-            end_date = pd.to_datetime(end_date)
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
         
         dm = DataManager()
+        
+        # Validate symbol first
+        if not dm.validate_symbol(symbol):
+            raise ValueError(f"Invalid or unknown symbol: {symbol}")
+        
         market_data = dm.fetch_market_data(symbol, start_date, end_date)
+        
+        if market_data is None or market_data.empty:
+            raise Exception(f"No data retrieved for {symbol} between {start_date} and {end_date}")
+        
+        # Basic data validation
+        if len(market_data) < 10:
+            raise ValueError(f"Insufficient data: only {len(market_data)} records found")
+        
         return market_data, None
     except Exception as e:
-        import traceback
-        error_msg = f"Error loading data: {str(e)}\n{traceback.format_exc()}"
+        error_msg = f"Data loading error: {str(e)}"
         return None, error_msg
 
-def process_features(market_data, symbol, strategy_params=None):
-    """Process features"""
+def process_features(market_data, strategy_params):
+    """Process features with enhanced error handling."""
     try:
-        fe = FeatureEngine()
+        if market_data is None or market_data.empty:
+            raise ValueError("No market data provided for feature processing")
         
-        # Calculate technical indicators
+        fe = FeatureEngine()
         technical_data = fe.calculate_technical_indicators(market_data, strategy_params)
+        
+        if technical_data is None or technical_data.empty:
+            raise Exception("Feature calculation returned empty data")
+        
+        # Validate feature data
+        if len(technical_data) < len(market_data) * 0.8:  # Allow some data loss due to indicators
+            st.warning(f"Feature processing reduced data from {len(market_data)} to {len(technical_data)} rows")
         
         return technical_data, None
     except Exception as e:
-        return None, str(e)
+        error_msg = f"Feature processing error: {str(e)}"
+        return None, error_msg
 
 def run_backtest(strategy_name, strategy_params, data, symbol):
-    """Run backtest with given strategy."""
+    """Run backtest with enhanced error handling."""
     try:
-        # Create strategy
-        strategy = StrategyFactory.create_strategy(strategy_name, strategy_params)
-
-        # Initialize backtester
+        if data is None or data.empty:
+            raise ValueError("No data provided for backtesting")
+        
+        # Create strategy using the factory method
+        strategy = BaseStrategy.create_strategy(strategy_name, strategy_params)
+        
+        # Initialize backtester with default parameters
         backtester = BacktestEngine(
-            initial_capital=100000,
-            commission_rate=0.001,
+            initial_capital=100000, 
+            commission_rate=0.001, 
             slippage_rate=0.0005
         )
         
-        # Run backtest
-        results = backtester.run_backtest(strategy, data, symbol)
+        # Add debugging for LSTM strategies
+        if strategy_name == "lstm_strategy":
+            st.info(f"🧠 Running LSTM strategy with {len(data)} data points and {len(data.columns)} features")
+            
+            # Check if we have enough data for LSTM
+            min_required = strategy_params.get('min_data_length', 300)
+            if len(data) < min_required:
+                raise ValueError(f"LSTM requires at least {min_required} data points, got {len(data)}")
         
-        return results, strategy, None
+        # Run backtest
+        with st.spinner(f"Running {strategy_name.replace('_', ' ').title()} backtest..."):
+            results = backtester.run_backtest(strategy, data, symbol)
+        
+        if results is None:
+            raise Exception("Backtest returned no results")
+        
+        # Check for backtest errors
+        if 'error' in results:
+            raise Exception(results['error'])
+        
+        # Store strategy instance for explainer usage
+        results['strategy_instance'] = strategy
+        
+        return results, None
     except Exception as e:
         import traceback
-        error_msg = f"Error in backtest: {str(e)}\n{traceback.format_exc()}"
-        return None, None, error_msg
+        error_msg = f"Backtest error: {str(e)}"
+        print(f"Full error: {traceback.format_exc()}")
+        return None, error_msg
+
+def validate_strategy_params(strategy_name, params):
+    """Validate strategy parameters."""
+    try:
+        if strategy_name == "simple_ma":
+            if params['fast_ma'] >= params['slow_ma']:
+                return False, "Fast MA period must be less than Slow MA period"
+        
+        elif strategy_name == "mean_reversion":
+            if params['rsi_oversold'] >= params['rsi_overbought']:
+                return False, "RSI Oversold threshold must be less than Overbought threshold"
+        
+        elif strategy_name == "momentum":
+            if params['fast_ma'] >= params['slow_ma']:
+                return False, "Fast MA period must be less than Slow MA period"
+        
+        elif strategy_name == "lstm_strategy":
+            if params['lookback_window'] < 10:
+                return False, "Lookback window must be at least 10 days"
+            if params['prediction_horizon'] < 1:
+                return False, "Prediction horizon must be at least 1 day"
+        
+        return True, ""
+    except Exception as e:
+        return False, f"Parameter validation error: {str(e)}"
 
 def main():
-    st.set_page_config(
-        page_title="Aura - Explainable AI Trading Platform",
-        page_icon="🔮",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    st.title("Aura - XAI Trading Platform")
-    st.markdown("*Demystifying algorithmic trading through transparent AI explanations*")
-    
-    # Sidebar for user inputs
-    st.sidebar.header("Configuration")
-    
-    # Asset Selection
-    st.sidebar.subheader("Asset Selection")
-
-    stock_options = {
-        "Apple": "AAPL",
-        "Google": "GOOGL",
-        "Microsoft": "MSFT",
-        "Amazon": "AMZN",
-        "Tesla": "TSLA",
-        "NVIDIA": "NVDA",
-        "Other (Custom)": "CUSTOM"
-    }
-
-    selected_option = st.sidebar.selectbox(
-        "Select Stock",
-        options = list(stock_options.keys()),
-        index = 0,  # Default to Apple
-        help = "Select a stock or choose 'Other' to enter a custom ticker."
-    )
-
-    if stock_options[selected_option] == "CUSTOM":
-        symbol = st.sidebar.text_input("Enter Custom Symbol", value="SPY").upper()
-    else:
-        symbol = stock_options[selected_option]
-
-    # Validate symbol
-    if symbol and not DataValidator.validate_stock_symbol(symbol):
-        st.sidebar.error("Invalid stock symbol format")
-        return
-    
-    # Date Range Selection
-    st.sidebar.subheader("Date Range")
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", value=datetime.now() - timedelta(days=365))
-    with col2:
-        end_date = st.date_input("End Date", value=datetime.now())
-    
-    # Validate date range
-    if not DataValidator.validate_date_range(datetime.combine(start_date, datetime.min.time()), 
-                                           datetime.combine(end_date, datetime.min.time())):
-        st.sidebar.error("Invalid date range")
-        return
-    
-    # Strategy Selection
-    st.sidebar.subheader("Strategy Selection")
-    strategy_options = {
-        "Simple MA Crossover": "simple_ma",
-        "Mean Reversion": "mean_reversion",
-        "Momentum": "momentum"
-    }
-    selected_strategy_name = st.sidebar.selectbox("Choose Strategy", 
-                                                  index = 0,
-                                                  options = list(strategy_options.keys()),
-                                                  help = "Select one of the common algorithmic trading strategies")
-    selected_strategy = strategy_options[selected_strategy_name]
-    
-    # Strategy Parameters
-    st.sidebar.subheader("Strategy Parameters")
-    strategy_params = {}
-    
-    if selected_strategy == "simple_ma":
-        strategy_params = {
-            'fast_ma': st.sidebar.slider("Fast MA Period", 5, 20, 10),
-            'slow_ma': st.sidebar.slider("Slow MA Period", 15, 50, 20)
-        }
-    elif selected_strategy == "mean_reversion":
-        strategy_params = {
-            'rsi_oversold': st.sidebar.slider("RSI Oversold", 20, 40, 30),
-            'rsi_overbought': st.sidebar.slider("RSI Overbought", 60, 80, 70),
-            'volume_threshold': st.sidebar.slider("Volume Threshold", 1.0, 3.0, 1.5),
-            'bb_period': st.sidebar.slider("BB Period", 10, 30, 20)
-        }
-    elif selected_strategy == "momentum":
-        strategy_params = {
-            'fast_ma': st.sidebar.slider("Fast MA", 5, 20, 10),
-            'slow_ma': st.sidebar.slider("Slow MA", 30, 100, 50),
-            'rsi_momentum_threshold': st.sidebar.slider("RSI Momentum", 40, 60, 50),
-            'min_momentum_strength': st.sidebar.slider("Momentum Strength", 0.01, 0.05, 0.02)
-        }
-    
-    # Risk Management
-    st.sidebar.subheader("Risk Management")
-    strategy_params.update({
-        'max_position_size': st.sidebar.slider("Max Position Size", 0.05, 0.5, 0.1),
-        'stop_loss_pct': st.sidebar.slider("Stop Loss %", 0.02, 0.1, 0.05),
-        'take_profit_pct': st.sidebar.slider("Take Profit %", 0.05, 0.3, 0.15)
-    })
-    
-    # Run Analysis Button
-    run_analysis = st.sidebar.button("Run Analysis", type="primary")
-    
-    # Main content area
-    if run_analysis:
-        with st.spinner("Fetching data and running analysis..."):
-            # Load data with proper datetime conversion
-            market_data, error = load_data(
-                symbol, 
-                datetime.combine(start_date, datetime.min.time()), 
-                datetime.combine(end_date, datetime.min.time())
-            )
-            
-            if error:
-                st.error(f"Error loading data: {error}")
-                return
-            
-            # Process features
-            processed_data, error = process_features(market_data, symbol, strategy_params)
-            
-            if error:
-                st.error(f"Error processing features: {error}")
-                return
-            
-            # Run backtest
-            results, strategy, error = run_backtest(selected_strategy, strategy_params, processed_data, symbol)
-            
-            if error:
-                st.error(f"Error running backtest: {error}")
-                return
-            
-        st.success("Analysis completed!")
+    try:
+        st.set_page_config(page_title="Aura - Explainable AI Trading Platform", page_icon="📈", layout="wide")
         
-        # Display results
-        display_results(results, processed_data, strategy, symbol)
-    else:
-        display_welcome_screen()
-
-def display_results(results, data, strategy, symbol):
-    """Display analysis results in tabs."""
+        st.title("📈 Aura - Explainable AI Trading Platform")
+        st.markdown("_*A comprehensive platform to backtest AI-powered trading strategies with explainable AI.*_")
+        
+        # Check backend availability
+        if not BACKEND_AVAILABLE:
+            st.error("❌ Backend modules are not available. Please ensure all backend files are in the correct directory.")
+            st.stop()
+        
+        # Sidebar configuration
+        st.sidebar.header("📋 Configuration")
+        
+        # Stock selection with more options
+        stock_options = {
+            "Apple": "AAPL", 
+            "Google": "GOOGL", 
+            "Microsoft": "MSFT", 
+            "Amazon": "AMZN", 
+            "Tesla": "TSLA",
+            "Netflix": "NFLX",
+            "Meta": "META",
+            "NVIDIA": "NVDA",
+            "SPY ETF": "SPY"
+        }
+        selected_stock = st.sidebar.selectbox("Select Stock", list(stock_options.keys()))
+        symbol = stock_options[selected_stock]
+        
+        # Date range selection
+        st.sidebar.subheader("📅 Date Range")
+        max_date = datetime.now().date()
+        default_start = max_date - timedelta(days=730)  # 2 years for LSTM
+        
+        start_date = st.sidebar.date_input("Start Date", default_start, max_value=max_date)
+        end_date = st.sidebar.date_input("End Date", max_date, max_value=max_date)
+        
+        # Validate date range
+        if start_date >= end_date:
+            st.sidebar.error("⚠️ Start date must be before end date")
+            st.stop()
+        
+        # Calculate data range info
+        date_range_days = (end_date - start_date).days
+        st.sidebar.info(f"📊 Date range: {date_range_days} days")
+        
+        # Strategy selection
+        st.sidebar.subheader("🎯 Strategy Selection")
+        strategy_options = {
+            "Simple MA Crossover": "simple_ma", 
+            "Mean Reversion": "mean_reversion", 
+            "Momentum": "momentum", 
+            "LSTM Deep Learning": "lstm_strategy"
+        }
+        selected_strategy_name = st.sidebar.selectbox("Choose Strategy", list(strategy_options.keys()))
+        selected_strategy = strategy_options[selected_strategy_name]
+        
+        # Strategy parameter configuration
+        st.sidebar.subheader("⚙️ Strategy Parameters")
+        strategy_params = {}
+        
+        if selected_strategy == "simple_ma":
+            st.sidebar.markdown("**Moving Average Crossover Settings**")
+            fast_ma = st.sidebar.slider("Fast MA Period", 5, 50, 10)
+            slow_ma = st.sidebar.slider("Slow MA Period", 20, 200, 50)
+            strategy_params = {'fast_ma': fast_ma, 'slow_ma': slow_ma}
+            
+        elif selected_strategy == "mean_reversion":
+            st.sidebar.markdown("**Mean Reversion Settings**")
+            strategy_params = {
+                'bb_period': st.sidebar.slider("Bollinger Bands Period", 10, 50, 20),
+                'rsi_period': st.sidebar.slider("RSI Period", 5, 30, 14),
+                'rsi_oversold': st.sidebar.slider("RSI Oversold Threshold", 20, 40, 30),
+                'rsi_overbought': st.sidebar.slider("RSI Overbought Threshold", 60, 80, 70),
+                'rsi_neutral_upper': st.sidebar.slider("RSI Neutral Upper", 50, 65, 55),
+                'rsi_neutral_lower': st.sidebar.slider("RSI Neutral Lower", 35, 50, 45)
+            }
+                
+        elif selected_strategy == "momentum":
+            st.sidebar.markdown("**Momentum Strategy Settings**")
+            fast_ma = st.sidebar.slider("Fast MA", 5, 50, 12)
+            slow_ma = st.sidebar.slider("Slow MA", 20, 200, 26)
+            strategy_params = {
+                'fast_ma': fast_ma,
+                'slow_ma': slow_ma,
+                'rsi_momentum_threshold': st.sidebar.slider("RSI Momentum Threshold", 40, 60, 50),
+                'rsi_strong_momentum': st.sidebar.slider("RSI Strong Momentum", 55, 75, 60),
+                'rsi_weak_momentum': st.sidebar.slider("RSI Weak Momentum", 25, 45, 40),
+                'macd_strength_threshold': st.sidebar.slider("MACD Strength", 0.0001, 0.01, 0.001, format="%.4f")
+            }
+            
+        elif selected_strategy == "lstm_strategy":
+            st.sidebar.markdown("**🧠 LSTM Deep Learning Settings**")
+            
+            # Check if we have enough data for LSTM
+            min_data_required = 300
+            if date_range_days < min_data_required:
+                st.sidebar.warning(f"⚠️ LSTM requires at least {min_data_required} days of data. Current range: {date_range_days} days")
+            
+            # Quick test configuration button
+            st.sidebar.markdown("---")
+            if st.sidebar.button("🚀 Use Quick Test Config", help="Use optimized settings for testing"):
+                st.sidebar.success("✅ Quick test configuration applied!")
+                # Set optimal testing parameters
+                lookback_window = 30
+                prediction_horizon = 1
+                lstm_layer1 = 32
+                lstm_layer2 = 16
+                dropout_rate = 0.2
+                learning_rate = 0.001
+                batch_size = 32
+                epochs = 25  # Reduced for faster testing
+                early_stopping_patience = 8
+                signal_threshold = 0.4  # Lower threshold for more signals
+                max_position_size = 0.1
+                stop_loss_pct = 0.05
+                take_profit_pct = 0.10
+                retrain_frequency = 30
+                use_shap = True
+                max_features = 15
+            else:
+                # Regular configuration
+                with st.sidebar.expander("Model Architecture", expanded=True):
+                    lookback_window = st.slider("Lookback Window (Days)", 30, 120, 60)
+                    prediction_horizon = st.slider("Prediction Horizon (Days)", 1, 10, 5)
+                    lstm_layer1 = st.slider("LSTM Layer 1 Units", 32, 128, 64)
+                    lstm_layer2 = st.slider("LSTM Layer 2 Units", 16, 64, 32)
+                    dropout_rate = st.slider("Dropout Rate", 0.1, 0.5, 0.2)
+                
+                with st.sidebar.expander("Training Parameters"):
+                    learning_rate = st.select_slider("Learning Rate", 
+                                                   options=[0.0001, 0.0005, 0.001, 0.005, 0.01], 
+                                                   value=0.001)
+                    batch_size = st.select_slider("Batch Size", 
+                                                options=[16, 32, 64, 128], 
+                                                value=32)
+                    epochs = st.slider("Max Epochs", 50, 200, 100)
+                    early_stopping_patience = st.slider("Early Stopping Patience", 5, 20, 15)
+                
+                with st.sidebar.expander("Signal & Risk Parameters"):
+                    signal_threshold = st.slider("Signal Confidence Threshold", 0.3, 0.9, 0.6)
+                    max_position_size = st.slider("Max Position Size", 0.05, 0.25, 0.1)
+                    stop_loss_pct = st.slider("Stop Loss %", 0.02, 0.10, 0.05)
+                    take_profit_pct = st.slider("Take Profit %", 0.05, 0.25, 0.15)
+                
+                with st.sidebar.expander("Advanced Settings"):
+                    retrain_frequency = st.slider("Retrain Frequency (Days)", 7, 60, 30)
+                    use_shap = st.checkbox("Enable SHAP Explanations", value=True)
+                    max_features = st.slider("Max Features for SHAP", 10, 30, 20)
+            
+            # Add helpful info about signal threshold
+            st.sidebar.info(f"💡 Signal Threshold: {signal_threshold:.1f} - Lower values generate more signals")
+            
+            strategy_params = {
+                'lookback_window': lookback_window,
+                'prediction_horizon': prediction_horizon,
+                'lstm_units': [lstm_layer1, lstm_layer2],
+                'dropout_rate': dropout_rate,
+                'learning_rate': learning_rate,
+                'batch_size': batch_size,
+                'epochs': epochs,
+                'early_stopping_patience': early_stopping_patience,
+                'signal_threshold': signal_threshold,
+                'retrain_frequency': retrain_frequency,
+                'min_data_length': min_data_required,
+                'use_shap': use_shap,
+                'max_features': max_features,
+                'max_position_size': max_position_size,
+                'stop_loss_pct': stop_loss_pct,
+                'take_profit_pct': take_profit_pct
+            }
+        
+        # Validate parameters
+        params_valid, param_error = validate_strategy_params(selected_strategy, strategy_params)
+        if not params_valid:
+            st.sidebar.error(f"⚠️ {param_error}")
+            st.stop()
+        
+        # Run analysis button
+        st.sidebar.markdown("---")
+        run_analysis = st.sidebar.button("🚀 Run Analysis", type="primary", use_container_width=True)
+        
+        if run_analysis:
+            # Create progress tracking
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            try:
+                # Step 1: Load data
+                status_text.text("📡 Loading market data...")
+                progress_bar.progress(25)
+                
+                market_data, error = load_data(symbol, start_date, end_date)
+                if error:
+                    st.error(f"❌ Data loading failed: {error}")
+                    st.stop()
+                
+                st.success(f"✅ Loaded {len(market_data)} data points for {symbol}")
+                
+                # Step 2: Process features
+                status_text.text("🔧 Processing technical indicators...")
+                progress_bar.progress(50)
+                
+                processed_data, error = process_features(market_data, strategy_params)
+                if error:
+                    st.error(f"❌ Feature processing failed: {error}")
+                    st.stop()
+                
+                # Step 3: Run backtest
+                status_text.text("📊 Running backtest...")
+                progress_bar.progress(75)
+                
+                results, error = run_backtest(selected_strategy, strategy_params, processed_data, symbol)
+                if error:
+                    st.error(f"❌ Backtest failed: {error}")
+                    st.stop()
+                
+                # Step 4: Complete
+                status_text.text("✅ Analysis complete!")
+                progress_bar.progress(100)
+                
+                # Store results in session state for explainer
+                st.session_state['results'] = results
+                st.session_state['processed_data'] = processed_data
+                st.session_state['strategy_type'] = selected_strategy
+                st.session_state['symbol'] = symbol
+                
+                # Clear progress indicators
+                progress_bar.empty()
+                status_text.empty()
+                
+                # Display results
+                display_results(results, processed_data, selected_strategy)
+                
+            except Exception as e:
+                progress_bar.empty()
+                status_text.empty()
+                st.error(f"❌ Unexpected error: {str(e)}")
     
-    # Create tabs for different views
-    tab1, tab2, tab3, tab4 = st.tabs(["Performance", "Trade Analysis", "AI Explanations", "Feature Importance"])
+    except Exception as e:
+        st.error(f"❌ Critical error in main application: {str(e)}")
+        import traceback
+        with st.expander("🔍 Error Details"):
+            st.code(traceback.format_exc())
+
+def display_results(results, data, strategy_type):
+    # Create tabs based on strategy type
+    if strategy_type == "lstm_strategy":
+        tab1, tab2, tab3, tab4 = st.tabs(["Performance", "Trade Analysis", "AI Explanations", "Strategy Insights"])
+    else:
+        tab1, tab2, tab3 = st.tabs(["Performance", "Trade Analysis", "Strategy Insights"])
     
     with tab1:
-        display_performance_tab(results, data)
-    
+        display_performance(results, data)
     with tab2:
-        display_trade_analysis_tab(results)
-    
-    with tab3:
-        display_ai_explanations_tab(results, data, strategy)
-    
-    with tab4:
-        display_feature_importance_tab(data, strategy)
+        display_trade_analysis(results)
+    if strategy_type == "lstm_strategy":
+        with tab3:
+            display_ai_explanations(results, data)
+        with tab4:
+            display_strategy_insights(results, strategy_type)
+    else:
+        with tab3:
+            display_strategy_insights(results, strategy_type)
 
-def display_performance_tab(results, data):
-    """Display performance metrics and charts."""
-    st.subheader("Backtest Performance")
-    
-    # Performance metrics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Return", f"{results['total_return']:.2%}")
-    with col2:
-        st.metric("Sharpe Ratio", f"{results['sharpe_ratio']:.2f}")
-    with col3:
-        st.metric("Max Drawdown", f"{results['max_drawdown']:.2%}")
-    with col4:
-        st.metric("Win Rate", f"{results['win_rate']:.2%}")
-    
-    # Additional metrics
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Annualized Return", f"{results['annualized_return']:.2%}")
-    with col2:
-        st.metric("Volatility", f"{results['volatility']:.2%}")
-    with col3:
-        st.metric("Profit Factor", f"{results['profit_factor']:.2f}")
-    with col4:
-        st.metric("Final Portfolio", f"${results['final_portfolio_value']:,.2f}")
-    
-    # Equity curve
-    st.subheader("Equity Curve")
-    equity_df = results['equity_curve']
-    
-    fig = go.Figure()
-    
-    # Portfolio value
-    fig.add_trace(go.Scatter(
-        x=equity_df['date'],
-        y=equity_df['portfolio_value'],
-        mode='lines',
-        name='Portfolio Value',
-        line=dict(color='blue', width=2)
-    ))
-    
-    # Benchmark (buy and hold)
-    if not data.empty:
-        benchmark_returns = data['Close'] / data['Close'].iloc[0] * 100000
-        fig.add_trace(go.Scatter(
-            x=data.index,
-            y=benchmark_returns,
-            mode='lines',
-            name='Buy & Hold',
-            line=dict(color='gray', width=1, dash='dash')
-        ))
-    
-    fig.update_layout(
-        title="Portfolio Performance vs Buy & Hold",
-        xaxis_title="Date",
-        yaxis_title="Portfolio Value ($)",
-        hovermode='x unified'
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Drawdown chart
-    st.subheader("Drawdown Analysis")
-    drawdown_df = results['drawdown_series']
-    
-    fig_dd = go.Figure()
-    fig_dd.add_trace(go.Scatter(
-        x=equity_df['date'],
-        y=drawdown_df * 100,
-        mode='lines',
-        name='Drawdown',
-        fill='tozeroy',
-        line=dict(color='red', width=1)
-    ))
-    
-    fig_dd.update_layout(
-        title="Portfolio Drawdown",
-        xaxis_title="Date",
-        yaxis_title="Drawdown (%)",
-        hovermode='x unified'
-    )
-    
-    st.plotly_chart(fig_dd, use_container_width=True)
+def display_performance(results, data):
+    """Enhanced performance display with better error handling."""
+    try:
+        st.subheader("📊 Backtest Performance")
+        
+        # Safely get metrics with defaults
+        total_return = results.get('total_return', 0)
+        sharpe_ratio = results.get('sharpe_ratio', 0)
+        max_drawdown = results.get('max_drawdown', 0)
+        win_rate = results.get('win_rate', 0)
+        annualized_return = results.get('annualized_return', 0)
+        volatility = results.get('volatility', 0)
+        profit_factor = results.get('profit_factor', 0)
+        final_value = results.get('final_portfolio_value', 100000)
+        
+        # Performance metrics grid
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Return", f"{total_return:.2%}", 
+                    delta=f"{total_return:.2%}" if total_return != 0 else None)
+        col2.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}",
+                    delta="Good" if sharpe_ratio > 1 else "Poor" if sharpe_ratio < 0 else "Average")
+        col3.metric("Max Drawdown", f"{max_drawdown:.2%}",
+                    delta="Low" if abs(max_drawdown) < 0.1 else "High")
+        col4.metric("Win Rate", f"{win_rate:.1%}",
+                    delta="Good" if win_rate > 0.5 else "Poor")
 
-def display_trade_analysis_tab(results):
-    """Display trade analysis and statistics."""
-    st.subheader("Trade Analysis")
-    
-    trades_df = results['trades']
-    
-    if not trades_df.empty:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Annualized Return", f"{annualized_return:.2%}")
+        col2.metric("Volatility", f"{volatility:.2%}")
+        col3.metric("Profit Factor", f"{profit_factor:.2f}")
+        col4.metric("Final Portfolio", f"${final_value:,.2f}")
+
+        # Equity curve with buy & hold comparison
+        st.subheader("📈 Equity Curve")
+        equity_curve = results.get('equity_curve', pd.Series())
+        if not equity_curve.empty and not data.empty:
+            fig = go.Figure()
+            
+            # Strategy performance
+            fig.add_trace(go.Scatter(
+                x=equity_curve.index, 
+                y=equity_curve, 
+                mode='lines', 
+                name='Strategy',
+                line=dict(color='blue', width=2)
+            ))
+            
+            # Buy & hold benchmark
+            if 'Close' in data.columns:
+                initial_value = 100000
+                buy_hold = data['Close'] / data['Close'].iloc[0] * initial_value
+                fig.add_trace(go.Scatter(
+                    x=data.index, 
+                    y=buy_hold, 
+                    mode='lines', 
+                    name='Buy & Hold',
+                    line=dict(color='red', width=2, dash='dash')
+                ))
+            
+            fig.update_layout(
+                title='Portfolio Value Over Time',
+                xaxis_title='Date',
+                yaxis_title='Portfolio Value ($)',
+                hovermode='x unified',
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No equity curve data available")
+
+        # Drawdown analysis
+        st.subheader("📉 Drawdown Analysis")
+        drawdown_series = results.get('drawdown_series', pd.Series())
+        if not drawdown_series.empty:
+            fig_dd = go.Figure()
+            fig_dd.add_trace(go.Scatter(
+                x=drawdown_series.index, 
+                y=drawdown_series * 100, 
+                mode='lines', 
+                name='Drawdown',
+                fill='tozeroy',
+                fillcolor='rgba(255, 0, 0, 0.3)',
+                line=dict(color='red')
+            ))
+            fig_dd.update_layout(
+                title='Portfolio Drawdown',
+                xaxis_title='Date',
+                yaxis_title='Drawdown (%)',
+                hovermode='x unified',
+                height=400
+            )
+            st.plotly_chart(fig_dd, use_container_width=True)
+        else:
+            st.warning("No drawdown data available")
+    except Exception as e:
+        st.error(f"Error displaying performance: {str(e)}")
+
+def display_trade_analysis(results):
+    """Enhanced trade analysis with better formatting."""
+    try:
+        st.subheader("💼 Trade Analysis")
+        
+        trades_df = results.get('trades', pd.DataFrame())
+        if trades_df.empty:
+            st.warning("⚠️ No trades were executed during the backtest period.")
+            st.info("""
+            Possible reasons:
+            - Strategy parameters are too conservative
+            - Market conditions didn't meet strategy criteria
+            - Insufficient data for signal generation
+            """)
+            return
+        
         # Trade statistics
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("Trade Statistics")
-            st.write(f"**Total Trades:** {results['total_trades']}")
-            st.write(f"**Winning Trades:** {results['winning_trades']}")
-            st.write(f"**Losing Trades:** {results['losing_trades']}")
-            st.write(f"**Win Rate:** {results['win_rate']:.2%}")
-            st.write(f"**Average Win:** ${results['avg_win']:.2f}")
-            st.write(f"**Average Loss:** ${results['avg_loss']:.2f}")
+            st.markdown("### 📊 Trade Statistics")
+            metrics = [
+                ("Total Trades", results.get('total_trades', 0)),
+                ("Winning Trades", results.get('winning_trades', 0)),
+                ("Losing Trades", results.get('losing_trades', 0)),
+                ("Win Rate", f"{results.get('win_rate', 0):.1%}"),
+                ("Average Win", f"${results.get('avg_win', 0):.2f}"),
+                ("Average Loss", f"${results.get('avg_loss', 0):.2f}")
+            ]
+            
+            for metric, value in metrics:
+                st.write(f"**{metric}:** {value}")
         
         with col2:
-            st.subheader("Cost Analysis")
-            st.write(f"**Total Commission:** ${results['total_commission']:.2f}")
-            st.write(f"**Total Slippage:** ${results['total_slippage']:.2f}")
-            st.write(f"**Commission %:** {results['commission_pct']:.3%}")
-            st.write(f"**Slippage %:** {results['slippage_pct']:.3%}")
-        
+            st.markdown("### 💰 Cost Analysis")
+            cost_metrics = [
+                ("Total Commission", f"${results.get('total_commission', 0):.2f}"),
+                ("Total Slippage", f"${results.get('total_slippage', 0):.2f}"),
+                ("Commission %", f"{results.get('commission_pct', 0):.3%}"),
+                ("Slippage %", f"{results.get('slippage_pct', 0):.3%}")
+            ]
+            
+            for metric, value in cost_metrics:
+                st.write(f"**{metric}:** {value}")
+
         # Trade log
-        st.subheader("Trade Log")
-        display_df = trades_df.copy()
-        if 'date' in display_df.columns:
-            display_df['date'] = pd.to_datetime(display_df['date']).dt.strftime('%Y-%m-%d')
-        
-        st.dataframe(display_df, use_container_width=True)
-        
-        # P&L distribution
-        if 'pnl' in trades_df.columns:
-            st.subheader("P&L Distribution")
-            pnl_data = trades_df['pnl'].dropna()
+        st.subheader("📋 Trade Log")
+        if len(trades_df) > 0:
+            # Format the trades dataframe for better display
+            display_df = trades_df.copy()
             
-            fig = px.histogram(
-                x=pnl_data,
-                nbins=20,
-                title="Trade P&L Distribution"
-            )
-            fig.update_layout(
-                xaxis_title="P&L ($)",
-                yaxis_title="Frequency"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    
-    else:
-        st.warning("No trades were executed during the backtest period")
+            # Format columns if they exist
+            if 'date' in display_df.columns:
+                display_df['date'] = pd.to_datetime(display_df['date']).dt.strftime('%Y-%m-%d')
+            if 'price' in display_df.columns:
+                display_df['price'] = display_df['price'].round(2)
+            if 'value' in display_df.columns:
+                display_df['value'] = display_df['value'].round(2)
+            if 'pnl' in display_df.columns:
+                display_df['pnl'] = display_df['pnl'].round(2)
+            
+            st.dataframe(display_df, use_container_width=True)
 
-def display_ai_explanations_tab(results, data, strategy):
-    """Display AI explanations for trading decisions."""
-    st.subheader("AI Decision Explanations")
-    st.markdown("*Understanding why the AI made each trading decision*")
-    
-    trades_df = results['trades']
-    
-    if not trades_df.empty:
-        # Trade selection for explanation
-        trade_options = []
-        for _, trade in trades_df.iterrows():
-            date_str = pd.to_datetime(trade['date']).strftime('%Y-%m-%d')
-            trade_options.append(f"{trade['action']} on {date_str} at ${trade['price']:.2f}")
+            # P&L distribution
+            if 'pnl' in trades_df.columns:
+                pnl_data = trades_df['pnl'].dropna()
+                if not pnl_data.empty:
+                    st.subheader("📊 P&L Distribution")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        fig = px.histogram(
+                            pnl_data, 
+                            nbins=min(20, len(pnl_data)), 
+                            title="Trade P&L Distribution"
+                        )
+                        fig.update_layout(
+                            xaxis_title="P&L ($)",
+                            yaxis_title="Number of Trades",
+                            height=400
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    with col2:
+                        # P&L statistics
+                        st.markdown("### P&L Statistics")
+                        st.write(f"**Mean P&L:** ${pnl_data.mean():.2f}")
+                        st.write(f"**Median P&L:** ${pnl_data.median():.2f}")
+                        st.write(f"**Std Dev:** ${pnl_data.std():.2f}")
+                        st.write(f"**Best Trade:** ${pnl_data.max():.2f}")
+                        st.write(f"**Worst Trade:** ${pnl_data.min():.2f}")
+    except Exception as e:
+        st.error(f"Error displaying trade analysis: {str(e)}")
+
+def display_ai_explanations(results, data):
+    """Enhanced AI explanations with better error handling."""
+    try:
+        st.subheader("🧠 AI Model Explanations")
         
-        selected_trade_idx = st.selectbox(
-            "Select Trade to Explain",
-            range(len(trade_options)),
-            format_func=lambda x: trade_options[x]
-        )
+        strategy_instance = results.get('strategy_instance')
+        if not strategy_instance:
+            st.warning("⚠️ Strategy instance not available for explanations.")
+            return
         
-        if selected_trade_idx is not None:
-            selected_trade = trades_df.iloc[selected_trade_idx]
-            trade_date = pd.to_datetime(selected_trade['date'])
-            signal = 1 if selected_trade['action'] == 'BUY' else -1
+        # Check if strategy supports explanations
+        if not hasattr(strategy_instance, 'get_feature_importance'):
+            st.info("ℹ️ This strategy does not support AI explanations.")
+            return
+        
+        # Initialize explainer
+        explainer = TradingStrategyExplainer(strategy_instance, data)
+        
+        # Check for available explanations
+        available_dates = []
+        if hasattr(strategy_instance, 'explanation_cache') and strategy_instance.explanation_cache:
+            available_dates = list(strategy_instance.explanation_cache.keys())
+            available_dates.sort(reverse=True)  # Most recent first
+        
+        if available_dates:
+            # Date selection
+            st.markdown("### 📅 Select Analysis Date")
+            col1, col2 = st.columns([3, 1])
             
-            # Generate explanation
-            try:
-                explainer = Explainer()
-                explanation = explainer.explain_trade_decision(
-                    strategy, data, trade_date, signal
+            with col1:
+                selected_date = st.selectbox(
+                    "Choose a prediction date to analyze:",
+                    available_dates,
+                    format_func=lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if hasattr(x, 'strftime') else str(x)
                 )
+            
+            with col2:
+                st.metric("Available Dates", len(available_dates))
+            
+            # Generate comprehensive explanation
+            with st.spinner("🔄 Generating AI explanations..."):
+                explanation = explainer.generate_comprehensive_explanation(selected_date)
+            
+            if "error" in explanation:
+                st.error(f"❌ {explanation['error']}")
+                return
+            
+            # Display narrative explanation
+            if 'narrative' in explanation and explanation['narrative']:
+                st.markdown("### 📝 Model Reasoning")
+                st.markdown(explanation['narrative'])
+            
+            # Display feature importance
+            if 'feature_importance' in explanation and explanation['feature_importance']:
+                st.markdown("### 🎯 Feature Importance")
+                feature_imp = explanation['feature_importance']
                 
-                display_trade_explanation(explanation, selected_trade)
+                # Create feature importance chart
+                top_features = dict(list(feature_imp.items())[:10])
+                if top_features:
+                    fig_features = go.Figure(data=[
+                        go.Bar(
+                            y=list(top_features.keys()),
+                            x=list(top_features.values()),
+                            orientation='h',
+                            marker_color='steelblue',
+                            text=[f"{v:.1%}" for v in top_features.values()],
+                            textposition='auto'
+                        )
+                    ])
+                    fig_features.update_layout(
+                        title='Top 10 Most Important Features',
+                        xaxis_title='Importance Score',
+                        yaxis_title='Features',
+                        height=500,
+                        margin=dict(l=150)  # More space for feature names
+                    )
+                    st.plotly_chart(fig_features, use_container_width=True)
+                    
+                    # Feature importance table
+                    with st.expander("📊 Detailed Feature Importance"):
+                        importance_df = pd.DataFrame([
+                            {'Feature': k, 'Importance': f"{v:.3%}", 'Score': v}
+                            for k, v in feature_imp.items()
+                        ])
+                        st.dataframe(importance_df, use_container_width=True)
+            
+            # Display market context
+            if 'market_context' in explanation and explanation['market_context']:
+                st.markdown("### 📊 Market Context")
+                market_ctx = explanation['market_context']
                 
+                if 'error' not in market_ctx:
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        if 'current_price' in market_ctx:
+                            st.metric("Current Price", f"${market_ctx['current_price']:.2f}")
+                    with col2:
+                        if 'trend_30d' in market_ctx:
+                            trend_value = market_ctx['trend_30d']
+                            st.metric("30-Day Trend", f"{trend_value:.1%}", 
+                                    delta="Bullish" if trend_value > 0 else "Bearish")
+                    with col3:
+                        if 'volatility_annualized' in market_ctx:
+                            vol_value = market_ctx['volatility_annualized']
+                            st.metric("Volatility (Ann.)", f"{vol_value:.1%}",
+                                    delta="High" if vol_value > 0.3 else "Low" if vol_value < 0.15 else "Normal")
+                    with col4:
+                        if 'price_position' in market_ctx:
+                            pos_value = market_ctx['price_position']
+                            st.metric("Price Position", f"{pos_value:.1%}",
+                                    delta="High" if pos_value > 0.8 else "Low" if pos_value < 0.2 else "Mid")
+            
+            # Display confidence metrics
+            if 'confidence_metrics' in explanation and explanation['confidence_metrics']:
+                st.markdown("### 🎯 Prediction Confidence")
+                conf_metrics = explanation['confidence_metrics']
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if 'shap_confidence' in conf_metrics:
+                        shap_conf = conf_metrics['shap_confidence']
+                        st.metric("SHAP Confidence", f"{shap_conf:.1%}",
+                                delta="High" if shap_conf > 0.7 else "Low" if shap_conf < 0.4 else "Medium")
+                with col2:
+                    if 'feature_consistency' in conf_metrics:
+                        feat_conf = conf_metrics['feature_consistency']
+                        st.metric("Feature Consistency", f"{feat_conf:.1%}",
+                                delta="Good" if feat_conf > 0.6 else "Poor")
+                with col3:
+                    if 'overall_confidence' in conf_metrics:
+                        overall_conf = conf_metrics['overall_confidence']
+                        st.metric("Overall Confidence", f"{overall_conf:.1%}",
+                                delta="High" if overall_conf > 0.7 else "Low" if overall_conf < 0.4 else "Medium")
+        
+        else:
+            st.info("ℹ️ No explanations available yet. The model needs to make predictions first.")
+            
+            # Display general feature importance if available
+            try:
+                feature_importance = strategy_instance.get_feature_importance()
+                if feature_importance:
+                    st.markdown("### 🎯 General Feature Importance")
+                    top_features = dict(list(feature_importance.items())[:10])
+                    
+                    if top_features:
+                        fig_features = go.Figure(data=[
+                            go.Bar(
+                                y=list(top_features.keys()),
+                                x=list(top_features.values()),
+                                orientation='h',
+                                marker_color='lightcoral',
+                                text=[f"{v:.1%}" for v in top_features.values()],
+                                textposition='auto'
+                            )
+                        ])
+                        fig_features.update_layout(
+                            title='Top 10 Most Important Features (Overall)',
+                            xaxis_title='Importance Score',
+                            yaxis_title='Features',
+                            height=500,
+                            margin=dict(l=150)
+                        )
+                        st.plotly_chart(fig_features, use_container_width=True)
+                        
+                        # Show feature importance table
+                        with st.expander("📊 Detailed Feature Importance"):
+                            importance_df = pd.DataFrame([
+                                {'Feature': k, 'Importance': f"{v:.3%}", 'Score': v}
+                                for k, v in feature_importance.items()
+                            ])
+                            st.dataframe(importance_df, use_container_width=True)
+                else:
+                    st.warning("⚠️ No feature importance data available.")
             except Exception as e:
-                st.error(f"Error generating explanation: {e}")
+                st.warning(f"⚠️ Could not display general feature importance: {str(e)}")
+            
+            # Show model information if available
+            if hasattr(strategy_instance, 'params'):
+                st.markdown("### 🔧 Model Configuration")
+                model_params = strategy_instance.params
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Architecture:**")
+                    st.write(f"- Lookback Window: {model_params.get('lookback_window', 'N/A')} days")
+                    st.write(f"- LSTM Units: {model_params.get('lstm_units', 'N/A')}")
+                    st.write(f"- Dropout Rate: {model_params.get('dropout_rate', 'N/A')}")
+                
+                with col2:
+                    st.write("**Training:**")
+                    st.write(f"- Learning Rate: {model_params.get('learning_rate', 'N/A')}")
+                    st.write(f"- Batch Size: {model_params.get('batch_size', 'N/A')}")
+                    st.write(f"- Max Epochs: {model_params.get('epochs', 'N/A')}")
+            
+            # Show training status if available
+            if hasattr(strategy_instance, 'last_training_date') and strategy_instance.last_training_date:
+                st.info(f"🕒 Last model training: {strategy_instance.last_training_date.strftime('%Y-%m-%d %H:%M:%S')}")
+            else:
+                st.warning("⚠️ Model has not been trained yet.")
     
-    else:
-        st.warning("No trades available for explanation")
+    except Exception as e:
+        st.error(f"❌ Error generating explanations: {str(e)}")
+        with st.expander("🔍 Error Details"):
+            import traceback
+            st.code(traceback.format_exc())
 
-def display_trade_explanation(explanation, trade):
-    """Display detailed trade explanation."""
-    
-    # Trade summary
-    st.subheader("Trade Summary")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.write(f"**Action:** {trade['action']}")
-        st.write(f"**Price:** ${trade['price']:.2f}")
-    with col2:
-        st.write(f"**Shares:** {trade['shares']}")
-        st.write(f"**Value:** ${trade['value']:.2f}")
-    with col3:
-        if 'pnl' in trade.index:
-            st.write(f"**P&L:** ${trade['pnl']:.2f}")
-            st.write(f"**P&L %:** {trade['pnl_pct']:.2%}")
-    
-    # Decision explanation
-    st.subheader("Decision Explanation")
-    st.write(explanation.get('signal_description', 'No description available'))
-    
-    # Strategy-specific explanations
-    if explanation.get('explanation_type') == 'rule_based':
-        # Rule-based explanation
-        if 'triggered_conditions' in explanation:
-            st.subheader("Triggered Conditions")
-            for condition in explanation['triggered_conditions']:
-                st.write(f"✓ {condition}")
+def display_strategy_insights(results, strategy_type):
+    """Display strategy-specific insights and analysis."""
+    try:
+        st.subheader("📊 Strategy Insights")
         
-        if 'decision_rationale' in explanation:
-            st.subheader("Decision Rationale")
-            for rationale in explanation['decision_rationale']:
-                st.write(f"• {rationale}")
+        if strategy_type == "lstm_strategy":
+            st.markdown("""
+            ### 🧠 LSTM Deep Learning Strategy Analysis
+            
+            The LSTM (Long Short-Term Memory) strategy uses deep learning to:
+            - **Analyze sequential patterns** in price and technical indicator data
+            - **Predict future price movements** using multi-class classification
+            - **Adapt to market conditions** through periodic retraining
+            - **Provide explainable predictions** using SHAP values
+            
+            #### Key Advantages:
+            - Captures complex temporal dependencies
+            - Handles non-linear relationships
+            - Provides prediction confidence scores
+            - Offers detailed explanations for each decision
+            """)
+            
+            # Display model-specific metrics if available
+            strategy_instance = results.get('strategy_instance')
+            if strategy_instance and hasattr(strategy_instance, 'last_training_date'):
+                col1, col2 = st.columns(2)
+                with col1:
+                    if strategy_instance.last_training_date:
+                        st.info(f"**Last Model Training:** {strategy_instance.last_training_date.strftime('%Y-%m-%d')}")
+                    if hasattr(strategy_instance, 'params'):
+                        st.info(f"**Lookback Window:** {strategy_instance.params.get('lookback_window', 'N/A')} days")
+                with col2:
+                    if hasattr(strategy_instance, 'params'):
+                        st.info(f"**Prediction Horizon:** {strategy_instance.params.get('prediction_horizon', 'N/A')} days")
+                        st.info(f"**Signal Threshold:** {strategy_instance.params.get('signal_threshold', 'N/A')}")
         
-        if 'feature_analysis' in explanation:
-            st.subheader("Feature Analysis")
-            for feature, analysis in explanation['feature_analysis'].items():
-                st.write(f"**{feature.replace('_', ' ').title()}:**")
-                for key, value in analysis.items():
-                    st.write(f"  - {key}: {value}")
-    
-    elif explanation.get('explanation_type') == 'ml_based':
-        # ML-based explanation with SHAP values
-        if 'feature_importance' in explanation:
-            st.subheader("Feature Importance")
+        else:
+            st.markdown(f"""
+            ### 📈 {strategy_type.replace('_', ' ').title()} Strategy Analysis
             
-            # Create DataFrame for visualization
-            importance_df = pd.DataFrame(explanation['feature_importance'])
+            This traditional strategy uses technical analysis to generate trading signals.
             
-            # Feature importance chart
-            fig = px.bar(
-                importance_df.head(10),
-                x='abs_importance',
-                y='feature',
-                orientation='h',
-                color='contribution',
-                title="Top 10 Feature Contributions",
-                color_discrete_map={'positive': 'green', 'negative': 'red'}
-            )
-            fig.update_layout(yaxis={'categoryorder': 'total ascending'})
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Top factors
-            if 'top_positive_factors' in explanation:
-                st.subheader("Top Positive Factors")
-                for factor in explanation['top_positive_factors']:
-                    st.write(f"✓ **{factor['feature']}**: {factor['description']}")
-            
-            if 'top_negative_factors' in explanation:
-                st.subheader("Top Negative Factors")
-                for factor in explanation['top_negative_factors']:
-                    st.write(f"✗ **{factor['feature']}**: {factor['description']}")
+            #### Characteristics:
+            - Rule-based signal generation
+            - Technical indicator driven
+            - Deterministic decision making
+            - Consistent risk management
+            """)
         
-        if 'confidence_score' in explanation:
-            st.subheader("Confidence Score")
-            st.progress(explanation['confidence_score'])
-            st.write(f"Model confidence: {explanation['confidence_score']:.2%}")
-    
-    # Risk factors
-    if 'risk_factors' in explanation:
-        st.subheader("Risk Factors")
-        for risk in explanation['risk_factors']:
-            st.warning(f"{risk}")
-    
-    # Market context
-    if 'market_context' in explanation:
-        st.subheader("Market Context")
-        context = explanation['market_context']
-        for key, value in context.items():
-            st.write(f"**{key.replace('_', ' ').title()}:** {value}")
-
-def display_feature_importance_tab(data, strategy):
-    """Display global feature importance analysis."""
-    st.subheader("Global Feature Importance")
-    st.markdown("*Most influential factors across all trading decisions*")
-    
-    # Calculate feature importance based on available data
-    numeric_columns = data.select_dtypes(include=[np.number]).columns
-    
-    if len(numeric_columns) > 0:
-        # Calculate correlation with returns
-        if 'Close' in data.columns:
-            returns = data['Close'].pct_change().dropna()
-            correlations = data[numeric_columns].corrwith(returns).abs().sort_values(ascending=False)
-            
-            # Create importance visualization
-            importance_df = pd.DataFrame({
-                'Feature': correlations.index,
-                'Importance': correlations.values
-            }).head(15)
-            
-            fig = px.bar(
-                importance_df,
-                x='Importance',
-                y='Feature',
-                orientation='h',
-                title="Feature Importance (Correlation with Returns)"
-            )
-            fig.update_layout(yaxis={'categoryorder': 'total ascending'})
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Feature descriptions
-            st.subheader("Feature Descriptions")
-            for feature in importance_df['Feature'].head(10):
-                description = get_feature_description(feature)
-                st.write(f"**{feature}:** {description}")
-    
-    else:
-        st.warning("No numeric features available for analysis")
-
-def get_feature_description(feature):
-    """Get description for a feature."""
-    descriptions = {
-        'RSI': 'Relative Strength Index - measures overbought/oversold conditions',
-        'MACD': 'Moving Average Convergence Divergence - trend and momentum indicator',
-        'BB_Position': 'Bollinger Bands Position - price position within bands',
-        'Volume_Ratio': 'Volume Ratio - current volume vs. average volume',
-        'Price_Change': 'Price Change - recent price movement',
-        'SMA_10': '10-day Simple Moving Average',
-        'SMA_50': '50-day Simple Moving Average',
-        'Volatility_20': '20-day Price Volatility',
-        'Close': 'Closing Price',
-        'Volume': 'Trading Volume'
-    }
-    
-    return descriptions.get(feature, f'{feature} - technical indicator')
-
-def display_welcome_screen():
-    """Display welcome screen when no analysis is run."""
-    st.markdown("## Welcome to Aura!")
-    st.markdown("""
-    **Aura** is your transparent AI trading companion that explains the 'why' behind every trade decision.
-    
-    ### How to use:
-    1. **Select an asset** in the sidebar (e.g., AAPL, GOOGL)
-    2. **Choose your date range** for backtesting
-    3. **Pick a trading strategy** from our library
-    4. **Adjust parameters** to customize the strategy
-    5. **Click 'Run Analysis'** to see the magic happen!
-    
-    ### What makes Aura special:
-    - **Explainable AI**: See exactly why each trade was made
-    - **Visual Insights**: Interactive charts and feature analysis
-    - **Educational**: Perfect for learning quantitative trading
-    - **Transparent**: No more black-box trading algorithms
-    
-    ### Available Strategies:
-    - **Simple MA Crossover**: Basic moving average crossover strategy - perfect for beginners
-    - **Mean Reversion**: Buys oversold assets, sells overbought ones
-    - **Momentum**: Follows trending price movements
-    
-    Ready to start? Configure your analysis in the sidebar and click **Run Analysis**!
-    """)
+        # Performance comparison section
+        st.subheader("📈 Performance Breakdown")
+        
+        # Risk metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Risk-Adjusted Return", f"{results.get('sharpe_ratio', 0):.2f}")
+        with col2:
+            st.metric("Maximum Drawdown", f"{results.get('max_drawdown', 0):.2%}")
+        with col3:
+            st.metric("Profit Factor", f"{results.get('profit_factor', 0):.2f}")
+        
+        # Trading frequency analysis
+        if not results['trades'].empty:
+            trades_df = results['trades']
+            if 'entry_date' in trades_df.columns and 'exit_date' in trades_df.columns:
+                try:
+                    avg_holding_period = (pd.to_datetime(trades_df['exit_date']) - pd.to_datetime(trades_df['entry_date'])).dt.days.mean()
+                    st.info(f"**Average Holding Period:** {avg_holding_period:.1f} days")
+                except:
+                    st.info("**Average Holding Period:** Not available")
+            else:
+                st.info("**Trading Activity:** Signal-based entries and exits")
+    except Exception as e:
+        st.error(f"Error displaying strategy insights: {str(e)}")
 
 if __name__ == "__main__":
     main()
