@@ -6,7 +6,7 @@
 
 Aura is a **fully functional** web-based platform that demystifies algorithmic trading for retail investors, data science students, and quantitative analysts. The platform has achieved its core innovation of integrating *Explainable AI (XAI)* to provide transparent, intuitive, and trustworthy insights into AI-driven trading strategies.
 
-**✅ CURRENT CAPABILITIES:**
+**CURRENT CAPABILITIES:**
 - Complete backtesting platform with 4+ trading strategies
 - Advanced LSTM deep learning strategy with SHAP explanations
 - Real-time market data integration via Yahoo Finance
@@ -19,7 +19,7 @@ Aura is a **fully functional** web-based platform that demystifies algorithmic t
 
 ### *2.  Features*
 
-**🎯 IMPLEMENTED:**
+**IMPLEMENTED:**
 
 #### *Data Management*
 - **Real-time data ingestion** from Yahoo Finance API
@@ -66,9 +66,9 @@ Aura is a **fully functional** web-based platform that demystifies algorithmic t
 
 ---
 
-### *3. 🏗️ Technical Implementation*
+### *3. Technical Implementation*
 
-**✅ PRODUCTION-READY ARCHITECTURE:**
+**PRODUCTION-READY ARCHITECTURE:**
 
 ```
 Frontend (Streamlit) → Backend APIs → Data Sources
@@ -83,7 +83,7 @@ Frontend (Streamlit) → Backend APIs → Data Sources
 └─────────────┘  └─────────────────┘  └─────────────┘
 ```
 
-**✅ IMPLEMENTED TECH STACK:**
+**IMPLEMENTED TECH STACK:**
 - **Backend**: Python 3.10+ with modern pandas methods
 - **AI/ML**: TensorFlow 2.x + SHAP for explainability
 - **Data**: Advanced feature engineering with 15+ indicators
@@ -92,7 +92,7 @@ Frontend (Streamlit) → Backend APIs → Data Sources
 
 ---
 
-### *4. 🚀 Quick Start Guide*
+### *4. Quick Start Guide*
 
 **INSTALLATION & SETUP:**
 ```bash
@@ -118,9 +118,9 @@ streamlit run main.py
 
 ---
 
-### *5. 🧠 AI Explainability Features*
+### *5. AI Explainability Features*
 
-**✅ ADVANCED XAI CAPABILITIES:**
+**ADVANCED XAI CAPABILITIES:**
 
 - **SHAP Waterfall Plots**: Visual breakdown of each prediction
 - **Feature Importance Rankings**: Top 10 most influential factors
@@ -131,10 +131,10 @@ streamlit run main.py
 
 **EXAMPLE EXPLANATION:**
 ```
-📝 Model Reasoning:
+Model Reasoning:
 The LSTM neural network identified sequential patterns suggesting BUY signal.
 
-🎯 Top Features:
+Top Features:
 1. RSI (14.2%) - Oversold condition
 2. MACD Signal (12.8%) - Bullish crossover
 3. Volume Ratio (11.3%) - Above average volume
@@ -144,9 +144,9 @@ The LSTM neural network identified sequential patterns suggesting BUY signal.
 
 ---
 
-### *7. 🔧 Configuration Options*
+### *7. Configuration Options*
 
-**✅ FULLY CUSTOMIZABLE:**
+**FULLY CUSTOMIZABLE:**
 
 **LSTM Quick Test Config** (Recommended for testing):
 - Lookback Window: 30 days
