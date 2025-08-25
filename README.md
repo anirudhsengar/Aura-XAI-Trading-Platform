@@ -1,15 +1,10 @@
 ## *Aura - The Explainable AI Trading & Investment Platform*
 
-*   *Project Name:* Aura
-*   *Version:* 1.0 (Implemented)
-*   *Date:* 2025-08-07
-*   *Project Lead:* anirudhsengar
-
 ---
 
 ### *1. Executive Summary*
 
-Aura is a **fully functional** web-based platform that successfully demystifies algorithmic trading for retail investors, data science students, and quantitative analysts. The platform has achieved its core innovation of integrating *Explainable AI (XAI)* to provide transparent, intuitive, and trustworthy insights into AI-driven trading strategies.
+Aura is a **fully functional** web-based platform that demystifies algorithmic trading for retail investors, data science students, and quantitative analysts. The platform has achieved its core innovation of integrating *Explainable AI (XAI)* to provide transparent, intuitive, and trustworthy insights into AI-driven trading strategies.
 
 **✅ CURRENT CAPABILITIES:**
 - Complete backtesting platform with 4+ trading strategies
@@ -22,9 +17,9 @@ Aura is a **fully functional** web-based platform that successfully demystifies 
 
 ---
 
-### *2. ✅ Implemented Features*
+### *2.  Features*
 
-**🎯 FULLY OPERATIONAL FEATURES:**
+**🎯 IMPLEMENTED:**
 
 #### *Data Management*
 - **Real-time data ingestion** from Yahoo Finance API
